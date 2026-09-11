@@ -7,6 +7,7 @@ import {
   query, 
   orderBy, 
   where, 
+  doc, 
   getDoc 
 } from "firebase/firestore";
 
@@ -15,12 +16,13 @@ import Login from "./pages/Login";
 import Pdv from "./pages/Pdv";
 import Estoque from "./pages/Estoque";
 import Relatorio from "./pages/Relatorio";
+import Configuracoes from "./pages/Configuracoes";
 
 export default function App() {
   const [usuarioLogado, setUsuarioLogado] = useState(null);
   const [verificandoAuth, setVerificandoAuth] = useState(true);
 
-  const [abaAtiva, setAbaAtiva] = useState("pdv");
+  const [abaAtiva, setAbaAtiva] = useState("menu");
   const [tema, setTema] = useState(() => localStorage.getItem("tema_lifesurf") || "dark");
   const [produtos, setProdutos] = useState([]);
   const [vendas, setVendas] = useState([]);
@@ -56,20 +58,20 @@ export default function App() {
 
   const cores = tema === "dark" ? {
     bgGeral: "#121212",
-    bgCard: "#1c1c1c",
-    bgCardSecundario: "#252525",
+    bgCard: "#121212",
+    bgCardSecundario: "#1a1a1a",
     bgItem: "#1e1e1e",
     borda: "#333333",
     bordaClara: "#444444",
     texto: "#ffffff",
     textoSecundario: "#aaaaaa",
     textoSuave: "#777777",
-    inputBg: "#2a2a2a",
+    inputBg: "transparent",
     itemAtivoBg: "#1a365d",
     itemAtivoBorda: "#3182ce"
   } : {
     bgGeral: "#f4f5f7",
-    bgCard: "#ffffff",
+    bgCard: "#f4f5f7",
     bgCardSecundario: "#eaecef",
     bgItem: "#ffffff",
     borda: "#dcdfe6",
@@ -77,42 +79,57 @@ export default function App() {
     texto: "#1a202c",
     textoSecundario: "#4a5568",
     textoSuave: "#a0aec0",
-    inputBg: "#ffffff",
+    inputBg: "transparent",
     itemAtivoBg: "#ebf8ff",
     itemAtivoBorda: "#3182ce"
   };
 
   async function carregarDados() {
+    if (!usuarioLogado) return;
+    const lojaId = usuarioLogado.uid;
+
     try {
-      // 1. Produtos
       const snapProdutos = await getDocs(collection(db, "produtos"));
-      setProdutos(snapProdutos.docs.map((d) => ({ id: d.id, ...d.data() })));
+      const listaProdutos = snapProdutos.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setProdutos(listaProdutos.filter(p => !p.lojaId || p.lojaId === lojaId));
 
-      // 2. Vendas
-      const qVendas = query(collection(db, "vendas"), orderBy("data", "desc"));
-      const snapVendas = await getDocs(qVendas);
-      setVendas(snapVendas.docs.map((d) => ({ id: d.id, ...d.data() })));
+      const snapVendas = await getDocs(collection(db, "vendas"));
+      const listaVendas = snapVendas.docs.map((d) => ({ id: d.id, ...d.data() }));
+      listaVendas.sort((a, b) => {
+        const tA = a.data?.toMillis ? a.data.toMillis() : 0;
+        const tB = b.data?.toMillis ? b.data.toMillis() : 0;
+        return tB - tA;
+      });
+      setVendas(listaVendas.filter(v => !v.lojaId || v.lojaId === lojaId));
 
-      // 3. Caixa Aberto
-      const qCaixa = query(collection(db, "caixas"), where("status", "==", "aberto"));
-      const snapCaixa = await getDocs(qCaixa);
-      if (!snapCaixa.empty) {
-        setCaixaAberto({ id: snapCaixa.docs[0].id, ...snapCaixa.docs[0].data() });
+      const snapCaixas = await getDocs(collection(db, "caixas"));
+      const listaCaixas = snapCaixas.docs.map((d) => ({ id: d.id, ...d.data() }));
+      
+      const caixaAbertoEncontrado = listaCaixas.find(c => c.status === "aberto" && (!c.lojaId || c.lojaId === lojaId));
+      setCaixaAberto(caixaAbertoEncontrado || null);
+
+      const caixasFechados = listaCaixas.filter(c => c.status === "fechado" && (!c.lojaId || c.lojaId === lojaId));
+      caixasFechados.sort((a, b) => {
+        const tA = a.fechadoEm?.toMillis ? a.fechadoEm.toMillis() : 0;
+        const tB = b.fechadoEm?.toMillis ? b.fechadoEm.toMillis() : 0;
+        return tB - tA;
+      });
+      if (caixasFechados.length > 0) {
+        setUltimoFechamentoSalvo(caixasFechados[0]);
       } else {
-        setCaixaAberto(null);
+        setUltimoFechamentoSalvo(null);
       }
 
-      // 4. Último Fechamento para Reimpressão
-      const qFechados = query(collection(db, "caixas"), where("status", "==", "fechado"), orderBy("fechadoEm", "desc"));
-      const snapFechados = await getDocs(qFechados);
-      if (!snapFechados.empty) {
-        setUltimoFechamentoSalvo(snapFechados.docs[0].data());
-      }
-
-      // 5. Histórico Consolidado (+30 dias arquivados)
-      const consDoc = await getDoc(doc(db, "configuracoes", "historicoConsolidado"));
+      const consDoc = await getDoc(doc(db, "configuracoes", `${lojaId}_historico`));
       if (consDoc.exists()) {
         setTotalHistoricoConsolidado(consDoc.data().totalAcumulado || 0);
+      } else {
+        const consGeral = await getDoc(doc(db, "configuracoes", "historicoConsolidado"));
+        if (consGeral.exists()) {
+          setTotalHistoricoConsolidado(consGeral.data().totalAcumulado || 0);
+        } else {
+          setTotalHistoricoConsolidado(0);
+        }
       }
     } catch (err) {
       console.error("Erro ao carregar dados do Firebase:", err);
@@ -125,7 +142,6 @@ export default function App() {
     }
   }, [usuarioLogado]);
 
-  // Função para emitir PDF do Inventário da aba Estoque
   function emitirRelatorioProdutos() {
     if (produtos.length === 0) {
       alert("Nenhum produto cadastrado!");
@@ -139,24 +155,27 @@ export default function App() {
     }, 300);
   }
 
-  // Se ainda estiver verificando a sessão do usuário
   if (verificandoAuth) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", justifyContent: "center", alignItems: "center", background: cores.bgGeral, color: cores.texto, fontFamily: "sans-serif" }}>
+      <div style={{ minHeight: "100vh", width: "100vw", display: "flex", justifyContent: "center", alignItems: "center", background: cores.bgGeral, color: cores.texto, fontFamily: "sans-serif" }}>
         Carregando sistema...
       </div>
     );
   }
 
-  // Se não estiver logado, exibe tela de login
   if (!usuarioLogado) {
     return <Login tema={tema} alternarTema={alternarTema} />;
   }
 
   return (
     <>
-      {/* CSS DE IMPRESSÃO (RECIBO EM BOBINA, RELATÓRIOS EM PAISAGEM) */}
       <style>{`
+        body, html, #root {
+          margin: 0;
+          padding: 0;
+          width: 100%;
+          background: ${cores.bgGeral};
+        }
         @media print {
           @page {
             size: ${dadosRecibo ? "80mm auto" : "landscape"};
@@ -205,7 +224,6 @@ export default function App() {
         }
       `}</style>
 
-      {/* 1. RECIBO TÉRMICO */}
       {dadosRecibo && (
         <div className="print-recibo">
           <div style={{ textAlign: "center", borderBottom: "1px dashed #000", paddingBottom: "8px" }}>
@@ -275,7 +293,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 2. RELATÓRIO DO FECHAMENTO DO DIA */}
       {dadosFechamentoPdf && (
         <div className="print-fechamento">
           <div style={{ borderBottom: "2px solid #000", paddingBottom: "10px", marginBottom: "15px" }}>
@@ -329,7 +346,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 3. RELAÇÃO GERAL DE PRODUTOS / INVENTÁRIO */}
       {dadosRelatorioProdutosPdf && (
         <div className="print-produtos">
           <div style={{ borderBottom: "2px solid #000", paddingBottom: "10px", marginBottom: "15px" }}>
@@ -373,13 +389,13 @@ export default function App() {
         </div>
       )}
 
-      {/* ÁREA DA APLICAÇÃO VISÍVEL */}
-      <div className="no-print" style={{ padding: "20px", fontFamily: "sans-serif", background: cores.bgGeral, color: cores.texto, minHeight: "100vh" }}>
+      {/* ÁREA DA APLICAÇÃO VISÍVEL (100% LARGURA DA TELA) */}
+      <div className="no-print" style={{ width: "100vw", minHeight: "100vh", padding: "20px", boxSizing: "border-box", fontFamily: "sans-serif", background: cores.bgGeral, color: cores.texto, margin: 0 }}>
         
         {/* CABEÇALHO DO SISTEMA */}
-        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${cores.borda}`, paddingBottom: "15px", marginBottom: "20px" }}>
+        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${cores.borda}`, paddingBottom: "15px", marginBottom: "20px", width: "100%" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <h1 style={{ margin: 0, fontSize: "22px" }}>⚡ LifeSurf</h1>
+            <h1 style={{ margin: 0, fontSize: "22px", color: cores.texto }}>PDV</h1>
             <span style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "12px", background: caixaAberto ? "#28a745" : "#e53e3e", color: "#fff", fontWeight: "bold" }}>
               {caixaAberto ? `Caixa Aberto (${caixaAberto.dataString})` : "Caixa Fechado"}
             </span>
@@ -389,27 +405,15 @@ export default function App() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <button
-              onClick={() => setAbaAtiva("pdv")}
-              style={{ padding: "10px 18px", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: "bold", background: abaAtiva === "pdv" ? "#007bff" : cores.bgCardSecundario, color: abaAtiva === "pdv" ? "#fff" : cores.texto }}
-            >
-              🛒 Frente de Caixa
-            </button>
-            <button
-              onClick={() => setAbaAtiva("estoque")}
-              style={{ padding: "10px 18px", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: "bold", background: abaAtiva === "estoque" ? "#007bff" : cores.bgCardSecundario, color: abaAtiva === "estoque" ? "#fff" : cores.texto }}
-            >
-              📦 Produtos & Estoque
-            </button>
-            <button
-              onClick={() => {
-                carregarDados();
-                setAbaAtiva("historico");
-              }}
-              style={{ padding: "10px 18px", borderRadius: "6px", border: "none", cursor: "pointer", fontWeight: "bold", background: abaAtiva === "historico" ? "#007bff" : cores.bgCardSecundario, color: abaAtiva === "historico" ? "#fff" : cores.texto }}
-            >
-              📊 Relatório & Caixa
-            </button>
+            {abaAtiva !== "menu" && (
+              <button
+                onClick={() => setAbaAtiva("menu")}
+                style={{ padding: "8px 14px", borderRadius: "6px", border: `1px solid ${cores.borda}`, background: cores.bgCardSecundario, color: cores.texto, cursor: "pointer", fontWeight: "bold", fontSize: "13px" }}
+              >
+                🏠 Menu Principal
+              </button>
+            )}
+
             <button
               onClick={alternarTema}
               style={{ padding: "8px 12px", borderRadius: "6px", border: `1px solid ${cores.borda}`, background: cores.bgCard, color: cores.texto, cursor: "pointer", fontSize: "13px" }}
@@ -418,14 +422,63 @@ export default function App() {
             </button>
             <button
               onClick={handleLogout}
-              style={{ padding: "8px 14px", borderRadius: "6px", border: "none", background: "#e53e3e", color: "#fff", cursor: "pointer", fontSize: "13px", fontWeight: "bold" }}
+              style={{ padding: "8px 14px", borderRadius: "6px", border: "none", background: "#e53e35", color: "#fff", cursor: "pointer", fontSize: "13px", fontWeight: "bold" }}
             >
               Sair 🚪
             </button>
           </div>
         </header>
 
-        {/* PÁGINAS RENDERIZADAS */}
+        {/* 1. TELA DE MENU PRINCIPAL */}
+        {abaAtiva === "menu" && (
+          <div style={{ width: "100%", padding: "40px 20px", boxSizing: "border-box", textAlign: "center" }}>
+            <h1 style={{ marginBottom: "10px", color: cores.texto, fontSize: "28px" }}>Escolha uma Opção</h1>
+            <p style={{ color: cores.textoSecundario, marginBottom: "40px", fontSize: "15px" }}>Gerencie sua frente de caixa, estoque e relatórios de forma isolada.</p>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "25px", width: "100%" }}>
+              <div 
+                onClick={() => setAbaAtiva("pdv")}
+                style={{ background: "transparent", padding: "35px 20px", borderRadius: "12px", cursor: "pointer", border: `2px solid #28a745`, transition: "0.2s" }}
+              >
+                <div style={{ fontSize: "40px", marginBottom: "12px" }}>🛒</div>
+                <h3 style={{ margin: "0 0 8px 0", color: cores.texto, fontSize: "18px" }}>Frente de Caixa (PDV)</h3>
+                <p style={{ fontSize: "13px", color: cores.textoSecundario, margin: 0 }}>Realizar vendas e emitir cupons</p>
+              </div>
+
+              <div 
+                onClick={() => setAbaAtiva("estoque")}
+                style={{ background: "transparent", padding: "35px 20px", borderRadius: "12px", cursor: "pointer", border: `2px solid #007bff`, transition: "0.2s" }}
+              >
+                <div style={{ fontSize: "40px", marginBottom: "12px" }}>📦</div>
+                <h3 style={{ margin: "0 0 8px 0", color: cores.texto, fontSize: "18px" }}>Produtos e Estoque</h3>
+                <p style={{ fontSize: "13px", color: cores.textoSecundario, margin: 0 }}>Cadastrar e gerenciar produtos</p>
+              </div>
+
+              <div 
+                onClick={() => {
+                  carregarDados();
+                  setAbaAtiva("historico");
+                }}
+                style={{ background: "transparent", padding: "35px 20px", borderRadius: "12px", cursor: "pointer", border: `2px solid #ffc107`, transition: "0.2s" }}
+              >
+                <div style={{ fontSize: "40px", marginBottom: "12px" }}>📊</div>
+                <h3 style={{ margin: "0 0 8px 0", color: cores.texto, fontSize: "18px" }}>Relatórios & Caixa</h3>
+                <p style={{ fontSize: "13px", color: cores.textoSecundario, margin: 0 }}>Fechamento e histórico de vendas</p>
+              </div>
+
+              <div 
+                onClick={() => setAbaAtiva("config")}
+                style={{ background: "transparent", padding: "35px 20px", borderRadius: "12px", cursor: "pointer", border: `2px solid #a55eea`, transition: "0.2s" }}
+              >
+                <div style={{ fontSize: "40px", marginBottom: "12px" }}>⚙️</div>
+                <h3 style={{ margin: "0 0 8px 0", color: cores.texto, fontSize: "18px" }}>Configurações</h3>
+                <p style={{ fontSize: "13px", color: cores.textoSecundario, margin: 0 }}>Logo, cupom e dados da loja</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 2. PÁGINAS RENDERIZADAS */}
         {abaAtiva === "pdv" && (
           <Pdv
             produtos={produtos}
@@ -448,6 +501,7 @@ export default function App() {
             cores={cores}
             recarregarDados={carregarDados}
             emitirRelatorioProdutos={emitirRelatorioProdutos}
+            usuarioLogado={usuarioLogado}
           />
         )}
 
@@ -463,6 +517,7 @@ export default function App() {
             totalHistoricoConsolidado={totalHistoricoConsolidado}
             setTotalHistoricoConsolidado={setTotalHistoricoConsolidado}
             recarregarDados={carregarDados}
+            setDadosRecibo={setDadosRecibo}
             setDadosFechamentoPdf={(dados) => {
               setDadosRecibo(null);
               setDadosRelatorioProdutosPdf(false);
@@ -470,6 +525,14 @@ export default function App() {
             }}
           />
         )}
+
+        {abaAtiva === "config" && (
+          <Configuracoes
+            usuarioLogado={usuarioLogado}
+            cores={cores}
+          />
+        )}
+
       </div>
     </>
   );

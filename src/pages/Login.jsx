@@ -120,7 +120,7 @@ export default function Login({ tema, alternarTema }) {
             </label>
             <input
               type="email"
-              placeholder="seuemail@gmail.com"
+              placeholder=""
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               autoFocus
@@ -144,7 +144,7 @@ export default function Login({ tema, alternarTema }) {
             </label>
             <input
               type="password"
-              placeholder="••••••••"
+              placeholder=""
               value={senha}
               onChange={(e) => setSenha(e.target.value)}
               style={{

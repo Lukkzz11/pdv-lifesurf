@@ -36,11 +36,19 @@ export default function Pdv({
   const [indiceFocoBusca, setIndiceFocoBusca] = useState(0);
   const [processandoVenda, setProcessandoVenda] = useState(false);
 
-  // Modais de Quantidade
+  // Modais de Quantidade e Preço
   const [produtoModal, setProdutoModal] = useState(null);
   const [qtdInput, setQtdInput] = useState("1");
   const inputQtdRef = useRef(null);
   const inputBuscaRef = useRef(null);
+
+  // Modal de Edição de Preço do Item no Carrinho
+  const [itemEditandoPreco, setItemEditandoPreco] = useState(null);
+  const [novoPrecoInput, setNovoPrecoInput] = useState("");
+  const inputPrecoRef = useRef(null);
+
+  // Modal de Ajuda / Atalhos (F1)
+  const [modalAtalhosAberto, setModalAtalhosAberto] = useState(false);
 
   // Fluxo de Fechamento por Teclado
   const [modalDescontoAberto, setModalDescontoAberto] = useState(false);
@@ -64,6 +72,9 @@ export default function Pdv({
     if (produtoModal && inputQtdRef.current) {
       inputQtdRef.current.focus();
       inputQtdRef.current.select();
+    } else if (itemEditandoPreco && inputPrecoRef.current) {
+      inputPrecoRef.current.focus();
+      inputPrecoRef.current.select();
     } else if (modalDescontoAberto && inputDescontoRef.current) {
       inputDescontoRef.current.focus();
       inputDescontoRef.current.select();
@@ -72,6 +83,8 @@ export default function Pdv({
       inputDinheiroRef.current.select();
     } else if (
       !produtoModal && 
+      !itemEditandoPreco &&
+      !modalAtalhosAberto &&
       !modalDescontoAberto && 
       !modalFormaPagtoAberto && 
       !modalCartaoAberto && 
@@ -80,7 +93,7 @@ export default function Pdv({
     ) {
       inputBuscaRef.current.focus();
     }
-  }, [produtoModal, modalDescontoAberto, modalFormaPagtoAberto, modalCartaoAberto, modalDinheiroAberto]);
+  }, [produtoModal, itemEditandoPreco, modalAtalhosAberto, modalDescontoAberto, modalFormaPagtoAberto, modalCartaoAberto, modalDinheiroAberto]);
 
   // Recalcular carrinho ao alternar atacado/varejo
   useEffect(() => {
@@ -160,6 +173,22 @@ export default function Pdv({
     setIndiceFocoBusca(0);
   }
 
+  function salvarPrecoItemModal(e) {
+    if (e) e.preventDefault();
+    const val = parseFloat(novoPrecoInput);
+    if (isNaN(val) || val < 0) {
+      alert("Informe um preço válido!");
+      return;
+    }
+
+    setCarrinho(
+      carrinho.map((item) =>
+        item.id === itemEditandoPreco.id ? { ...item, precoUnitario: val } : item
+      )
+    );
+    setItemEditandoPreco(null);
+  }
+
   function removerDoCarrinho(id) {
     setCarrinho(carrinho.filter((item) => item.id !== id));
   }
@@ -180,9 +209,26 @@ export default function Pdv({
 
   const subtotalComDesconto = Math.max(0, subtotalBruto - valorDescontoCalculado);
 
-  // Eventos de teclado global para navegação nos modais
+  // Eventos de teclado global para modais, F1 e tecla Q
   useEffect(() => {
     function handleTecladoGlobal(e) {
+      if (e.key === "F1") {
+        e.preventDefault();
+        setModalAtalhosAberto((prev) => !prev);
+        return;
+      }
+
+      // Atalho Q para alterar preço do último item (somente se busca estiver vazia e nenhum modal aberto)
+      if (e.key.toLowerCase() === "q" && !produtoModal && !itemEditandoPreco && !modalDescontoAberto && !modalFormaPagtoAberto && !modalCartaoAberto && !modalDinheiroAberto && !modalAtalhosAberto) {
+        if (buscaPdv.trim() === "" && carrinho.length > 0) {
+          e.preventDefault();
+          const ultimoItem = carrinho[carrinho.length - 1];
+          setItemEditandoPreco(ultimoItem);
+          setNovoPrecoInput(ultimoItem.precoUnitario.toString());
+          return;
+        }
+      }
+
       if (modalDescontoAberto) {
         if (e.key === "ArrowLeft") {
           e.preventDefault();
@@ -255,7 +301,7 @@ export default function Pdv({
 
     window.addEventListener("keydown", handleTecladoGlobal);
     return () => window.removeEventListener("keydown", handleTecladoGlobal);
-  }, [modalDescontoAberto, modalFormaPagtoAberto, modalCartaoAberto, indiceFormaPagto, indiceParcela, subtotalComDesconto]);
+  }, [modalDescontoAberto, modalFormaPagtoAberto, modalCartaoAberto, indiceFormaPagto, indiceParcela, subtotalComDesconto, buscaPdv, carrinho, produtoModal, itemEditandoPreco, modalAtalhosAberto, modalDinheiroAberto]);
 
   function iniciarFluxoFechamentoTeclado() {
     if (carrinho.length === 0) {
@@ -341,6 +387,7 @@ export default function Pdv({
           caixaId: caixaAberto ? caixaAberto.id : "sem_caixa",
           tipoVenda: tipoTabela,
           operadorEmail: usuarioLogado?.email || "operador",
+          lojaId: usuarioLogado?.uid || "loja_padrao",
           itens: carrinho.map((item) => ({
             id: item.id,
             nome: item.nome,
@@ -424,6 +471,54 @@ export default function Pdv({
 
   return (
     <>
+      {/* MODAL DE AJUDA / ATALHOS (F1) */}
+      {modalAtalhosAberto && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
+          <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "400px", border: `1px solid ${cores.borda}` }}>
+            <h3 style={{ margin: "0 0 15px 0" }}>⌨️ Atalhos do Sistema</h3>
+            <ul style={{ paddingLeft: "20px", color: cores.textoSecundario, lineHeight: "1.8", margin: "0 0 20px 0" }}>
+              <li><strong>Enter (com busca vazia):</strong> Inicia o fechamento da venda.</li>
+              <li><strong>Setas (↑ ↓):</strong> Navegam pelos produtos na busca.</li>
+              <li><strong>Tecla Q (com busca vazia):</strong> Altera o preço do último item do carrinho.</li>
+              <li><strong>Clique no preço/item:</strong> Altera o valor unitário direto no mouse.</li>
+              <li><strong>F1:</strong> Abre / fecha este painel de ajuda.</li>
+            </ul>
+            <button onClick={() => setModalAtalhosAberto(false)} style={{ width: "100%", padding: "10px", background: "#007bff", color: "#fff", border: "none", borderRadius: "4px", fontWeight: "bold", cursor: "pointer" }}>
+              Fechar (Esc / F1)
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDIÇÃO DE PREÇO DO ITEM */}
+      {itemEditandoPreco && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
+          <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "340px", border: `1px solid ${cores.borda}` }}>
+            <h3 style={{ margin: "0 0 10px 0", fontSize: "18px" }}>✏️ Alterar Preço Unitário</h3>
+            <p style={{ color: cores.textoSecundario, fontSize: "14px", margin: "0 0 15px 0" }}>
+              Item: <strong>{itemEditandoPreco.nome}</strong>
+            </p>
+
+            <form onSubmit={salvarPrecoItemModal}>
+              <label style={{ display: "block", fontSize: "13px", marginBottom: "6px", color: cores.textoSecundario }}>Novo Preço Unitário (R$):</label>
+              <input
+                ref={inputPrecoRef}
+                type="number"
+                step="0.01"
+                value={novoPrecoInput}
+                onChange={(e) => setNovoPrecoInput(e.target.value)}
+                style={{ width: "100%", padding: "12px", fontSize: "22px", fontWeight: "bold", textAlign: "center", background: cores.inputBg, border: `1px solid ${cores.bordaClara}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box", marginBottom: "15px" }}
+              />
+
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button type="button" onClick={() => setItemEditandoPreco(null)} style={{ flex: 1, padding: "10px", background: cores.bgCardSecundario, color: cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "4px", cursor: "pointer" }}>Cancelar</button>
+                <button type="submit" style={{ flex: 1, padding: "10px", background: "#28a745", color: "#fff", border: "none", borderRadius: "4px", fontWeight: "bold", cursor: "pointer" }}>Salvar (Enter)</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* MODAL DESCONTO */}
       {modalDescontoAberto && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
@@ -666,21 +761,29 @@ export default function Pdv({
       )}
 
       {/* ÁREA DA FRENTE DE CAIXA */}
-      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: "25px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: "25px", width: "100%" }}>
         <div>
-          <div style={{ display: "flex", gap: "10px", alignItems: "center", background: cores.bgCard, padding: "12px 16px", borderRadius: "6px", marginBottom: "20px", border: `1px solid ${cores.borda}` }}>
-            <span style={{ fontSize: "14px", fontWeight: "bold" }}>Modo de Venda:</span>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: cores.bgCard, padding: "12px 16px", borderRadius: "6px", marginBottom: "20px", border: `1px solid ${cores.borda}` }}>
+            <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+              <span style={{ fontSize: "14px", fontWeight: "bold" }}>Modo de Venda:</span>
+              <button
+                onClick={() => setTipoTabela("varejo")}
+                style={{ padding: "6px 16px", borderRadius: "4px", border: "none", cursor: "pointer", fontWeight: "bold", background: tipoTabela === "varejo" ? "#28a745" : cores.bgCardSecundario, color: tipoTabela === "varejo" ? "#fff" : cores.texto }}
+              >
+                Varejo
+              </button>
+              <button
+                onClick={() => setTipoTabela("atacado")}
+                style={{ padding: "6px 16px", borderRadius: "4px", border: "none", cursor: "pointer", fontWeight: "bold", background: tipoTabela === "atacado" ? "#007bff" : cores.bgCardSecundario, color: "#fff" }}
+              >
+                Atacado
+              </button>
+            </div>
             <button
-              onClick={() => setTipoTabela("varejo")}
-              style={{ padding: "6px 16px", borderRadius: "4px", border: "none", cursor: "pointer", fontWeight: "bold", background: tipoTabela === "varejo" ? "#28a745" : cores.bgCardSecundario, color: tipoTabela === "varejo" ? "#fff" : cores.texto }}
+              onClick={() => setModalAtalhosAberto(true)}
+              style={{ background: cores.bgCardSecundario, color: cores.texto, border: `1px solid ${cores.borda}`, padding: "6px 12px", borderRadius: "4px", fontSize: "12px", cursor: "pointer", fontWeight: "bold" }}
             >
-              Varejo
-            </button>
-            <button
-              onClick={() => setTipoTabela("atacado")}
-              style={{ padding: "6px 16px", borderRadius: "4px", border: "none", cursor: "pointer", fontWeight: "bold", background: tipoTabela === "atacado" ? "#007bff" : cores.bgCardSecundario, color: "#fff" }}
-            >
-              Atacado
+              ⌨️ Atalhos (F1)
             </button>
           </div>
 
@@ -705,8 +808,8 @@ export default function Pdv({
               }}
             />
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", fontSize: "12px", color: cores.textoSuave, padding: "0 4px" }}>
-              <span>{termo.length === 0 ? "Com a busca vazia: tecle Enter para iniciar o Fechamento" : "Navegue com as setas ↑ ↓"}</span>
-              <span>Enter ↵ confirma</span>
+              <span>{termo.length === 0 ? "Com a busca vazia: tecle Enter para Fechar ou Q para alterar preço" : "Navegue com as setas ↑ ↓"}</span>
+              <span>Pressione F1 para ver os atalhos</span>
             </div>
           </div>
 
@@ -777,9 +880,17 @@ export default function Pdv({
                   <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${cores.bordaClara}`, paddingBottom: "8px" }}>
                     <div>
                       <div>{item.nome}</div>
-                      <div style={{ fontSize: "12px", color: cores.textoSecundario }}>
+                      <div 
+                        onClick={() => {
+                          setItemEditandoPreco(item);
+                          setNovoPrecoInput(item.precoUnitario.toString());
+                        }}
+                        title="Clique para alterar o preço"
+                        style={{ fontSize: "12px", color: cores.textoSecundario, cursor: "pointer" }}
+                      >
                         {item.referencia ? `Ref: ${item.referencia} | ` : ""}
-                        {item.quantidade}x R$ {Number(item.precoUnitario).toFixed(2)} = <strong>R$ {(Number(item.precoUnitario) * item.quantidade).toFixed(2)}</strong>
+                        {item.quantidade}x <span style={{ color: "#3182ce", textDecoration: "underline" }}>R$ {Number(item.precoUnitario).toFixed(2)}</span> = <strong>R$ {(Number(item.precoUnitario) * item.quantidade).toFixed(2)}</strong> 
+                        <span style={{ fontSize: "10px", marginLeft: "5px", color: cores.textoSuave }}>(✏️ editar)</span>
                       </div>
                     </div>
                     <button onClick={() => removerDoCarrinho(item.id)} style={{ background: "#e53e3e", color: "#fff", border: "none", borderRadius: "4px", padding: "4px 8px", cursor: "pointer", fontSize: "12px" }}>✕</button>
