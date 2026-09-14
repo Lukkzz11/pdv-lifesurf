@@ -4,9 +4,6 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { 
   collection, 
   getDocs, 
-  query, 
-  orderBy, 
-  where, 
   doc, 
   getDoc 
 } from "firebase/firestore";
@@ -29,6 +26,15 @@ export default function App() {
   const [caixaAberto, setCaixaAberto] = useState(null);
   const [ultimoFechamentoSalvo, setUltimoFechamentoSalvo] = useState(null);
   const [totalHistoricoConsolidado, setTotalHistoricoConsolidado] = useState(0);
+
+  // Configurações da Loja para o Cupom
+  const [configLoja, setConfigLoja] = useState({
+    nomeLoja: "LIFESURF",
+    logoUrl: "",
+    endereco: "",
+    telefone: "",
+    mensagemRodape: "OBRIGADO PELA PREFERENCIA! VOLTE SEMPRE!"
+  });
 
   // Estados de Impressão Global
   const [dadosRecibo, setDadosRecibo] = useState(null);
@@ -89,6 +95,20 @@ export default function App() {
     const lojaId = usuarioLogado.uid;
 
     try {
+      // Carrega Configurações da Loja
+      const docConfigRef = doc(db, "configuracoes", lojaId);
+      const snapConfig = await getDoc(docConfigRef);
+      if (snapConfig.exists()) {
+        const dadosCfg = snapConfig.data();
+        setConfigLoja({
+          nomeLoja: dadosCfg.nomeLoja || "LIFESURF",
+          logoUrl: dadosCfg.logoUrl || "",
+          endereco: dadosCfg.endereco || "",
+          telefone: dadosCfg.telefone || "",
+          mensagemRodape: dadosCfg.mensagemRodape || "OBRIGADO PELA PREFERENCIA! VOLTE SEMPRE!"
+        });
+      }
+
       const snapProdutos = await getDocs(collection(db, "produtos"));
       const listaProdutos = snapProdutos.docs.map((d) => ({ id: d.id, ...d.data() }));
       setProdutos(listaProdutos.filter(p => !p.lojaId || p.lojaId === lojaId));
@@ -227,8 +247,15 @@ export default function App() {
       {dadosRecibo && (
         <div className="print-recibo">
           <div style={{ textAlign: "center", borderBottom: "1px dashed #000", paddingBottom: "8px" }}>
-            <h2 style={{ margin: "0 0 4px 0", fontSize: "16px" }}>LIFESURF </h2>
-            <div style={{ fontSize: "11px" }}>COMPROVANTE DE VENDA</div>
+            {configLoja.logoUrl && (
+              <div style={{ marginBottom: "6px" }}>
+                <img src={configLoja.logoUrl} alt="Logo" style={{ maxHeight: "40px", maxWidth: "120px", objectFit: "contain" }} />
+              </div>
+            )}
+            <h2 style={{ margin: "0 0 2px 0", fontSize: "16px" }}>{configLoja.nomeLoja}</h2>
+            {configLoja.endereco && <div style={{ fontSize: "10px" }}>{configLoja.endereco}</div>}
+            {configLoja.telefone && <div style={{ fontSize: "10px" }}>Tel: {configLoja.telefone}</div>}
+            <div style={{ fontSize: "11px", marginTop: "4px", fontWeight: "bold" }}>COMPROVANTE DE VENDA</div>
             <div style={{ fontSize: "11px" }}>Pedido: #{dadosRecibo.id}</div>
             <div style={{ fontSize: "11px" }}>{dadosRecibo.dataHora}</div>
           </div>
@@ -287,8 +314,7 @@ export default function App() {
           </div>
 
           <div style={{ textAlign: "center", marginTop: "12px", fontSize: "11px" }}>
-            <div>OBRIGADO PELA PREFERENCIA!</div>
-            <div>VOLTE SEMPRE!</div>
+            <div>{configLoja.mensagemRodape}</div>
           </div>
         </div>
       )}
@@ -296,7 +322,7 @@ export default function App() {
       {dadosFechamentoPdf && (
         <div className="print-fechamento">
           <div style={{ borderBottom: "2px solid #000", paddingBottom: "10px", marginBottom: "15px" }}>
-            <h1 style={{ margin: 0, fontSize: "20px" }}>LIFESURF - FECHAMENTO DE CAIXA DIÁRIO</h1>
+            <h1 style={{ margin: 0, fontSize: "20px" }}>{configLoja.nomeLoja} - FECHAMENTO DE CAIXA DIÁRIO</h1>
             <div style={{ fontSize: "12px", marginTop: "4px" }}>
               Data: <strong>{dadosFechamentoPdf.dataHoje}</strong> | Fechamento: <strong>{dadosFechamentoPdf.horaFechamento}</strong>
             </div>
@@ -349,7 +375,7 @@ export default function App() {
       {dadosRelatorioProdutosPdf && (
         <div className="print-produtos">
           <div style={{ borderBottom: "2px solid #000", paddingBottom: "10px", marginBottom: "15px" }}>
-            <h1 style={{ margin: 0, fontSize: "20px" }}>LIFESURF - RELAÇÃO GERAL DE PRODUTOS / ESTOQUE</h1>
+            <h1 style={{ margin: 0, fontSize: "20px" }}>{configLoja.nomeLoja} - RELAÇÃO GERAL DE PRODUTOS / ESTOQUE</h1>
             <div style={{ fontSize: "12px", marginTop: "4px" }}>
               Emitido em: <strong>{new Date().toLocaleString("pt-BR")}</strong> | Total de Itens: <strong>{produtos.length}</strong>
             </div>
@@ -508,6 +534,7 @@ export default function App() {
         {abaAtiva === "historico" && (
           <Relatorio
             vendas={vendas}
+            produtos={produtos}
             caixaAberto={caixaAberto}
             setCaixaAberto={setCaixaAberto}
             usuarioLogado={usuarioLogado}
@@ -530,6 +557,7 @@ export default function App() {
           <Configuracoes
             usuarioLogado={usuarioLogado}
             cores={cores}
+            recarregarConfigLoja={carregarDados}
           />
         )}
 

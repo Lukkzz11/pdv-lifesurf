@@ -4,7 +4,8 @@ import {
   collection, 
   doc, 
   runTransaction, 
-  serverTimestamp 
+  serverTimestamp, 
+  addDoc 
 } from "firebase/firestore";
 
 const TAXAS_CARTAO = {
@@ -30,27 +31,37 @@ export default function Pdv({
   recarregarDados, 
   setDadosRecibo 
 }) {
-  const [tipoTabela, setTipoTabela] = useState("varejo");
+  const [tipoTabela, setTipoTabela] = useState("varejo"); 
   const [carrinho, setCarrinho] = useState([]);
   const [buscaPdv, setBuscaPdv] = useState("");
   const [indiceFocoBusca, setIndiceFocoBusca] = useState(0);
   const [processandoVenda, setProcessandoVenda] = useState(false);
 
-  // Modais de Quantidade e Preço
   const [produtoModal, setProdutoModal] = useState(null);
   const [qtdInput, setQtdInput] = useState("1");
   const inputQtdRef = useRef(null);
   const inputBuscaRef = useRef(null);
 
-  // Modal de Edição de Preço do Item no Carrinho
   const [itemEditandoPreco, setItemEditandoPreco] = useState(null);
   const [novoPrecoInput, setNovoPrecoInput] = useState("");
   const inputPrecoRef = useRef(null);
 
-  // Modal de Ajuda / Atalhos (F1)
   const [modalAtalhosAberto, setModalAtalhosAberto] = useState(false);
 
-  // Fluxo de Fechamento por Teclado
+  const [modalTrocaInfoAberto, setModalTrocaInfoAberto] = useState(false);
+  const [itemTrocadoInput, setItemTrocadoInput] = useState("");
+  const [valorDiferencaInput, setValorDiferencaInput] = useState("");
+  const [levouAlgoMaisInput, setLevouAlgoMaisInput] = useState("");
+  const inputTroca1Ref = useRef(null);
+  const inputTroca2Ref = useRef(null);
+  const inputTroca3Ref = useRef(null);
+
+  const [modalAVerInfoAberto, setModalAVerInfoAberto] = useState(false);
+  const [nomeResponsavelAVer, setNomeResponsavelAVer] = useState("");
+  const [observacaoAVer, setObservacaoAVer] = useState("");
+  const inputAVer1Ref = useRef(null);
+  const inputAVer2Ref = useRef(null);
+
   const [modalDescontoAberto, setModalDescontoAberto] = useState(false);
   const [tipoDesconto, setTipoDesconto] = useState("reais");
   const [valorDescontoInput, setValorDescontoInput] = useState("");
@@ -67,7 +78,14 @@ export default function Pdv({
   const [valorEntregueInput, setValorEntregueInput] = useState("");
   const inputDinheiroRef = useRef(null);
 
-  // Foco inteligente
+  const listaBuscaRef = useRef(null);
+
+  // Cores dinâmicas por modo de venda
+  const corModo = 
+    tipoTabela === "atacado" ? "#007bff" :
+    tipoTabela === "troca" ? "#e67e22" :
+    tipoTabela === "a_ver" ? "#8e44ad" : "#28a745";
+
   useEffect(() => {
     if (produtoModal && inputQtdRef.current) {
       inputQtdRef.current.focus();
@@ -75,6 +93,10 @@ export default function Pdv({
     } else if (itemEditandoPreco && inputPrecoRef.current) {
       inputPrecoRef.current.focus();
       inputPrecoRef.current.select();
+    } else if (modalTrocaInfoAberto && inputTroca1Ref.current) {
+      inputTroca1Ref.current.focus();
+    } else if (modalAVerInfoAberto && inputAVer1Ref.current) {
+      inputAVer1Ref.current.focus();
     } else if (modalDescontoAberto && inputDescontoRef.current) {
       inputDescontoRef.current.focus();
       inputDescontoRef.current.select();
@@ -89,25 +111,28 @@ export default function Pdv({
       !modalFormaPagtoAberto && 
       !modalCartaoAberto && 
       !modalDinheiroAberto && 
+      !modalTrocaInfoAberto &&
+      !modalAVerInfoAberto &&
       inputBuscaRef.current
     ) {
       inputBuscaRef.current.focus();
     }
-  }, [produtoModal, itemEditandoPreco, modalAtalhosAberto, modalDescontoAberto, modalFormaPagtoAberto, modalCartaoAberto, modalDinheiroAberto]);
+  }, [produtoModal, itemEditandoPreco, modalAtalhosAberto, modalDescontoAberto, modalFormaPagtoAberto, modalCartaoAberto, modalDinheiroAberto, modalTrocaInfoAberto, modalAVerInfoAberto]);
 
-  // Recalcular carrinho ao alternar atacado/varejo
   useEffect(() => {
-    setCarrinho((prev) =>
-      prev.map((item) => {
-        const prod = produtos.find((p) => p.id === item.id);
-        const preco = prod
-          ? tipoTabela === "atacado"
-            ? Number(prod.precoAtacado || prod.precoVarejo || 0)
-            : Number(prod.precoVarejo || prod.preco || 0)
-          : item.precoUnitario;
-        return { ...item, precoUnitario: preco };
-      })
-    );
+    if (tipoTabela === "varejo" || tipoTabela === "atacado") {
+      setCarrinho((prev) =>
+        prev.map((item) => {
+          const prod = produtos.find((p) => p.id === item.id);
+          const preco = prod
+            ? tipoTabela === "atacado"
+              ? Number(prod.precoAtacado || prod.precoVarejo || 0)
+              : Number(prod.precoVarejo || prod.preco || 0)
+            : item.precoUnitario;
+          return { ...item, precoUnitario: preco };
+        })
+      );
+    }
   }, [tipoTabela, produtos]);
 
   function getPrecoAtual(produto) {
@@ -143,7 +168,7 @@ export default function Pdv({
       return;
     }
 
-    const precoCobrado = getPrecoAtual(produtoModal);
+    const precoCobrado = tipoTabela === "a_ver" ? 0 : getPrecoAtual(produtoModal);
 
     if (itemExistente) {
       setCarrinho(
@@ -199,7 +224,7 @@ export default function Pdv({
   );
 
   let valorDescontoCalculado = 0;
-  if (descontoAplicado.valor > 0) {
+  if (descontoAplicado.valor > 0 && tipoTabela !== "a_ver") {
     if (descontoAplicado.tipo === "porcentagem") {
       valorDescontoCalculado = (subtotalBruto * descontoAplicado.valor) / 100;
     } else {
@@ -207,20 +232,30 @@ export default function Pdv({
     }
   }
 
-  const subtotalComDesconto = Math.max(0, subtotalBruto - valorDescontoCalculado);
+  const subtotalComDesconto = tipoTabela === "a_ver" ? 0 : Math.max(0, subtotalBruto - valorDescontoCalculado);
+  const formasPagamentoDisponiveis = tipoTabela === "troca" ? ["Troca", ...FORMAS_PAGAMENTO] : FORMAS_PAGAMENTO;
 
-  // Eventos de teclado global para modais, F1 e tecla Q
   useEffect(() => {
     function handleTecladoGlobal(e) {
+      const isInputBuscaFocado = document.activeElement === inputBuscaRef.current;
+
       if (e.key === "F1") {
         e.preventDefault();
         setModalAtalhosAberto((prev) => !prev);
         return;
       }
 
-      // Atalho Q para alterar preço do último item (somente se busca estiver vazia e nenhum modal aberto)
-      if (e.key.toLowerCase() === "q" && !produtoModal && !itemEditandoPreco && !modalDescontoAberto && !modalFormaPagtoAberto && !modalCartaoAberto && !modalDinheiroAberto && !modalAtalhosAberto) {
-        if (buscaPdv.trim() === "" && carrinho.length > 0) {
+      if (!produtoModal && !itemEditandoPreco && !modalDescontoAberto && !modalFormaPagtoAberto && !modalCartaoAberto && !modalDinheiroAberto && !modalAtalhosAberto && !modalTrocaInfoAberto && !modalAVerInfoAberto) {
+        if (buscaPdv.trim() === "" && !isInputBuscaFocado) {
+          if (e.key === "1") { e.preventDefault(); setTipoTabela("varejo"); return; }
+          if (e.key === "2") { e.preventDefault(); setTipoTabela("atacado"); return; }
+          if (e.key === "3") { e.preventDefault(); setTipoTabela("troca"); return; }
+          if (e.key === "4") { e.preventDefault(); setTipoTabela("a_ver"); return; }
+        }
+      }
+
+      if (e.key.toLowerCase() === "q" && !produtoModal && !itemEditandoPreco && !modalDescontoAberto && !modalFormaPagtoAberto && !modalCartaoAberto && !modalDinheiroAberto && !modalAtalhosAberto && !modalTrocaInfoAberto && !modalAVerInfoAberto) {
+        if (buscaPdv.trim() === "" && carrinho.length > 0 && !isInputBuscaFocado && tipoTabela !== "a_ver") {
           e.preventDefault();
           const ultimoItem = carrinho[carrinho.length - 1];
           setItemEditandoPreco(ultimoItem);
@@ -230,29 +265,28 @@ export default function Pdv({
       }
 
       if (modalDescontoAberto) {
-        if (e.key === "ArrowLeft") {
-          e.preventDefault();
-          setTipoDesconto("reais");
-        } else if (e.key === "ArrowRight") {
-          e.preventDefault();
-          setTipoDesconto("porcentagem");
-        }
+        if (e.key === "ArrowLeft") { e.preventDefault(); setTipoDesconto("reais"); }
+        else if (e.key === "ArrowRight") { e.preventDefault(); setTipoDesconto("porcentagem"); }
         return;
       }
 
       if (modalFormaPagtoAberto) {
         if (e.key === "ArrowDown") {
           e.preventDefault();
-          setIndiceFormaPagto((prev) => (prev < FORMAS_PAGAMENTO.length - 1 ? prev + 1 : 0));
+          setIndiceFormaPagto((prev) => (prev < formasPagamentoDisponiveis.length - 1 ? prev + 1 : 0));
         } else if (e.key === "ArrowUp") {
           e.preventDefault();
-          setIndiceFormaPagto((prev) => (prev > 0 ? prev - 1 : FORMAS_PAGAMENTO.length - 1));
+          setIndiceFormaPagto((prev) => (prev > 0 ? prev - 1 : formasPagamentoDisponiveis.length - 1));
         } else if (e.key === "Enter") {
           e.preventDefault();
-          const formaEscolhida = FORMAS_PAGAMENTO[indiceFormaPagto];
+          const formaEscolhida = formasPagamentoDisponiveis[indiceFormaPagto];
           setModalFormaPagtoAberto(false);
 
-          if (formaEscolhida === "Cartão de Crédito") {
+          if (formaEscolhida === "Troca") {
+            const diferencaNum = Number(valorDiferencaInput) || 0;
+            const valorFinalTroca = Math.max(0, subtotalComDesconto + diferencaNum);
+            executarVendaNoBanco(valorFinalTroca, "Troca", null, null);
+          } else if (formaEscolhida === "Cartão de Crédito") {
             setIndiceParcela(0);
             setModalCartaoAberto(true);
           } else if (formaEscolhida === "Dinheiro") {
@@ -283,11 +317,7 @@ export default function Pdv({
           const valorParcela = totalComTaxa / parcelasNum;
 
           const descPagamento = `Crédito ${conf.label}`;
-          const info = {
-            qtdParcelas: parcelasNum,
-            taxaPercentual: conf.taxa * 100,
-            valorParcela: valorParcela
-          };
+          const info = { qtdParcelas: parcelasNum, taxaPercentual: conf.taxa * 100, valorParcela: valorParcela };
 
           setModalCartaoAberto(false);
           executarVendaNoBanco(totalComTaxa, descPagamento, info, null);
@@ -301,7 +331,7 @@ export default function Pdv({
 
     window.addEventListener("keydown", handleTecladoGlobal);
     return () => window.removeEventListener("keydown", handleTecladoGlobal);
-  }, [modalDescontoAberto, modalFormaPagtoAberto, modalCartaoAberto, indiceFormaPagto, indiceParcela, subtotalComDesconto, buscaPdv, carrinho, produtoModal, itemEditandoPreco, modalAtalhosAberto, modalDinheiroAberto]);
+  }, [modalDescontoAberto, modalFormaPagtoAberto, modalCartaoAberto, indiceFormaPagto, indiceParcela, subtotalComDesconto, buscaPdv, carrinho, produtoModal, itemEditandoPreco, modalAtalhosAberto, modalDinheiroAberto, modalTrocaInfoAberto, modalAVerInfoAberto, formasPagamentoDisponiveis, valorDiferencaInput]);
 
   function iniciarFluxoFechamentoTeclado() {
     if (carrinho.length === 0) {
@@ -312,8 +342,41 @@ export default function Pdv({
       alert("O caixa está fechado! Abra o caixa na aba 'Relatório & Caixa'.");
       return;
     }
+
+    if (tipoTabela === "troca") {
+      setItemTrocadoInput("");
+      setValorDiferencaInput("");
+      setLevouAlgoMaisInput("");
+      setModalTrocaInfoAberto(true);
+      return;
+    }
+
+    if (tipoTabela === "a_ver") {
+      setNomeResponsavelAVer("");
+      setObservacaoAVer("");
+      setModalAVerInfoAberto(true);
+      return;
+    }
+
     setValorDescontoInput("");
     setModalDescontoAberto(true);
+  }
+
+  function confirmarTrocaEProsseguir(e) {
+    e.preventDefault();
+    setModalTrocaInfoAberto(false);
+    setIndiceFormaPagto(0);
+    setModalFormaPagtoAberto(true);
+  }
+
+  async function confirmarAVerEProsseguir(e) {
+    e.preventDefault();
+    if (!nomeResponsavelAVer.trim()) {
+      alert("Informe o nome de quem pegou a mercadoria!");
+      return;
+    }
+    setModalAVerInfoAberto(false);
+    await executarMercadoriaAVerNoBanco();
   }
 
   function confirmarDescontoTeclado(e) {
@@ -341,13 +404,84 @@ export default function Pdv({
       return;
     }
 
-    const infoDinheiro = {
-      valorEntregue: valorEntregueNum,
-      troco: trocoCalculado
-    };
-
+    const infoDinheiro = { valorEntregue: valorEntregueNum, troco: trocoCalculado };
     setModalDinheiroAberto(false);
     executarVendaNoBanco(subtotalComDesconto, "Dinheiro", null, infoDinheiro);
+  }
+
+  async function executarMercadoriaAVerNoBanco() {
+    setProcessandoVenda(true);
+    try {
+      const hoje = new Date();
+      const dataString = hoje.toLocaleDateString("pt-BR");
+      const obsTexto = `Responsável: ${nomeResponsavelAVer.trim()} ${observacaoAVer ? `| Obs: ${observacaoAVer.trim()}` : ""}`;
+
+      await runTransaction(db, async (transaction) => {
+        const leituras = [];
+        for (const item of carrinho) {
+          const ref = doc(db, "produtos", item.id);
+          const snap = await transaction.get(ref);
+          if (!snap.exists()) throw new Error(`Produto ${item.nome} não encontrado!`);
+          
+          const estoqueAtual = snap.data().estoque;
+          const aceitaNegativo = snap.data().permiteNegativo || false;
+
+          if (!aceitaNegativo && estoqueAtual < item.quantidade) {
+            throw new Error(`Estoque insuficiente para ${item.nome}!`);
+          }
+
+          leituras.push({ ref, novoEstoque: estoqueAtual - item.quantidade });
+        }
+
+        for (const item of leituras) {
+          transaction.update(item.ref, { estoque: item.novoEstoque });
+        }
+
+        const vendaRef = doc(collection(db, "vendas"));
+        transaction.set(vendaRef, {
+          data: serverTimestamp(),
+          dataString: dataString,
+          caixaId: caixaAberto ? caixaAberto.id : "sem_caixa",
+          tipoVenda: "a_ver",
+          operadorEmail: usuarioLogado?.email || "operador",
+          lojaId: usuarioLogado?.uid || "loja_padrao",
+          itens: carrinho.map((item) => ({
+            id: item.id,
+            nome: item.nome,
+            referencia: item.referencia,
+            codigoBarras: item.codigoBarras,
+            precoUnitario: 0,
+            quantidade: item.quantidade,
+          })),
+          subtotalBruto: 0,
+          desconto: 0,
+          total: 0,
+          formaPagamento: "A Ver",
+          infoTroca: { itemTrocado: obsTexto, valorDiferenca: 0, levouAlgoMais: "" }
+        });
+
+        const pedidoRef = doc(collection(db, "pedidos"));
+        transaction.set(pedidoRef, {
+          lojaId: usuarioLogado?.uid || "loja_padrao",
+          cliente: nomeResponsavelAVer.trim(),
+          tipo: "mercadoria_a_ver",
+          status: "pendente_prova",
+          itensDescricao: carrinho.map(i => `${i.quantidade}x ${i.nome}`).join("; "),
+          observacao: observacaoAVer.trim(),
+          itens: carrinho,
+          data: serverTimestamp()
+        });
+      });
+
+      alert("Mercadoria a ver registrada com sucesso!");
+      setCarrinho([]);
+      setDescontoAplicado({ tipo: "reais", valor: 0, totalDescontado: 0 });
+      await recarregarDados();
+    } catch (err) {
+      alert("Erro ao registrar mercadoria a ver: " + err.message);
+    } finally {
+      setProcessandoVenda(false);
+    }
   }
 
   async function executarVendaNoBanco(valorFinal, pagtoDescricao, infoParcelas, infoDinheiro) {
@@ -356,6 +490,15 @@ export default function Pdv({
       let vendaCriadaId = "";
       const hoje = new Date();
       const dataString = hoje.toLocaleDateString("pt-BR");
+
+      const diferencaTrocaNum = tipoTabela === "troca" ? (Number(valorDiferencaInput) || 0) : 0;
+      const valorTotalFinalTroca = Math.max(0, subtotalComDesconto + diferencaTrocaNum);
+
+      const infoTrocaObj = tipoTabela === "troca" ? {
+        itemTrocado: itemTrocadoInput.trim(),
+        valorDiferenca: diferencaNum,
+        levouAlgoMais: levouAlgoMaisInput.trim()
+      } : null;
 
       await runTransaction(db, async (transaction) => {
         const leituras = [];
@@ -398,10 +541,11 @@ export default function Pdv({
           })),
           subtotalBruto: subtotalBruto,
           desconto: valorDescontoCalculado,
-          total: valorFinal,
+          total: tipoTabela === "troca" ? valorTotalFinalTroca : valorFinal,
           formaPagamento: pagtoDescricao,
           parcelas: infoParcelas || null,
-          dadosDinheiro: infoDinheiro || null
+          dadosDinheiro: infoDinheiro || null,
+          infoTroca: infoTrocaObj
         });
       });
 
@@ -411,11 +555,12 @@ export default function Pdv({
         itens: [...carrinho],
         subtotalBruto: subtotalBruto,
         desconto: valorDescontoCalculado,
-        total: valorFinal,
+        total: tipoTabela === "troca" ? valorTotalFinalTroca : valorFinal,
         formaPagamento: pagtoDescricao,
         infoParcelas: infoParcelas,
         infoDinheiro: infoDinheiro,
-        tipoVenda: tipoTabela
+        tipoVenda: tipoTabela,
+        infoTroca: infoTrocaObj
       };
 
       setDadosRecibo(recibo);
@@ -437,17 +582,39 @@ export default function Pdv({
   const termo = buscaPdv.trim().toLowerCase();
   const produtosFiltrados = termo.length > 0
     ? produtos.filter((p) => {
-        return (
-          p.nome?.toLowerCase().includes(termo) ||
-          p.codigoBarras?.toLowerCase().includes(termo) ||
-          p.referencia?.toLowerCase().includes(termo)
-        );
+        const nomeP = p.nome?.toLowerCase() || "";
+        const refP = p.referencia?.toLowerCase() || "";
+        const codP = p.codigoBarras?.toLowerCase() || "";
+
+        const termoSemEspacos = termo.replace(/\s+/g, "");
+        const nomeSemEspacos = nomeP.replace(/\s+/g, "");
+
+        const matchNomeExato = nomeP.includes(termo) || nomeSemEspacos.includes(termoSemEspacos);
+        const matchRef = refP.includes(termo) || refP === termo;
+        const matchCod = codP.includes(termo);
+
+        return matchNomeExato || matchRef || matchCod;
+      }).sort((a, b) => {
+        const aRef = (a.referencia || "").toLowerCase();
+        const bRef = (b.referencia || "").toLowerCase();
+        if (aRef === termo && bRef !== termo) return -1;
+        if (bRef === termo && aRef !== termo) return 1;
+        return 0;
       })
     : [];
 
   useEffect(() => {
     setIndiceFocoBusca(0);
   }, [buscaPdv]);
+
+  useEffect(() => {
+    if (listaBuscaRef.current && produtosFiltrados.length > 0) {
+      const elementoAtivo = listaBuscaRef.current.children[indiceFocoBusca];
+      if (elementoAtivo) {
+        elementoAtivo.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
+    }
+  }, [indiceFocoBusca, produtosFiltrados]);
 
   function handleKeyDownBusca(e) {
     if (e.key === "Enter") {
@@ -466,21 +633,33 @@ export default function Pdv({
     } else if (e.key === "ArrowUp" && produtosFiltrados.length > 0) {
       e.preventDefault();
       setIndiceFocoBusca((prev) => (prev > 0 ? prev - 1 : produtosFiltrados.length - 1));
+    } else if (e.key === "ArrowRight" && termo.length === 0) {
+      e.preventDefault();
+      if (tipoTabela === "varejo") setTipoTabela("atacado");
+      else if (tipoTabela === "atacado") setTipoTabela("troca");
+      else if (tipoTabela === "troca") setTipoTabela("a_ver");
+      else if (tipoTabela === "a_ver") setTipoTabela("varejo");
+    } else if (e.key === "ArrowLeft" && termo.length === 0) {
+      e.preventDefault();
+      if (tipoTabela === "varejo") setTipoTabela("a_ver");
+      else if (tipoTabela === "a_ver") setTipoTabela("troca");
+      else if (tipoTabela === "troca") setTipoTabela("atacado");
+      else if (tipoTabela === "atacado") setTipoTabela("varejo");
     }
   }
 
   return (
     <>
-      {/* MODAL DE AJUDA / ATALHOS (F1) */}
       {modalAtalhosAberto && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
-          <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "400px", border: `1px solid ${cores.borda}` }}>
-            <h3 style={{ margin: "0 0 15px 0" }}>⌨️ Atalhos do Sistema</h3>
-            <ul style={{ paddingLeft: "20px", color: cores.textoSecundario, lineHeight: "1.8", margin: "0 0 20px 0" }}>
-              <li><strong>Enter (com busca vazia):</strong> Inicia o fechamento da venda.</li>
-              <li><strong>Setas (↑ ↓):</strong> Navegam pelos produtos na busca.</li>
+          <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "420px", border: `1px solid ${cores.borda}` }}>
+            <h3 style={{ margin: "0 0 15px 0" }}>⌨️ Atalhos do Sistema PDV</h3>
+            <ul style={{ paddingLeft: "20px", color: cores.textoSecundario, lineHeight: "1.8", margin: "0 0 20px 0", fontSize: "13px" }}>
+              <li><strong>Teclas 1, 2, 3, 4 (com busca vazia):</strong> Alternam entre Varejo, Atacado, Troca e Mercadoria a Ver.</li>
+              <li><strong>Setas ← / → (com busca vazia):</strong> Alternam os modos de venda.</li>
+              <li><strong>Enter (com busca vazia):</strong> Inicia o fechamento da venda ou preenchimento especial.</li>
+              <li><strong>Setas (↑ ↓):</strong> Navegam pelos produtos na busca com rolagem automática.</li>
               <li><strong>Tecla Q (com busca vazia):</strong> Altera o preço do último item do carrinho.</li>
-              <li><strong>Clique no preço/item:</strong> Altera o valor unitário direto no mouse.</li>
               <li><strong>F1:</strong> Abre / fecha este painel de ajuda.</li>
             </ul>
             <button onClick={() => setModalAtalhosAberto(false)} style={{ width: "100%", padding: "10px", background: "#007bff", color: "#fff", border: "none", borderRadius: "4px", fontWeight: "bold", cursor: "pointer" }}>
@@ -490,7 +669,104 @@ export default function Pdv({
         </div>
       )}
 
-      {/* MODAL EDIÇÃO DE PREÇO DO ITEM */}
+      {modalTrocaInfoAberto && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
+          <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "400px", border: `1px solid ${cores.borda}` }}>
+            <h3 style={{ margin: "0 0 10px 0" }}>🔄 Informações da Troca</h3>
+            <p style={{ color: cores.textoSecundario, fontSize: "13px", margin: "0 0 15px 0" }}>Preencha os dados da troca. Pressione Enter para avançar.</p>
+
+            <form onSubmit={confirmarTrocaEProsseguir}>
+              <div style={{ marginBottom: "12px" }}>
+                <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>O que foi trocado?</label>
+                <input
+                  ref={inputTroca1Ref}
+                  type="text"
+                  placeholder=""
+                  value={itemTrocadoInput}
+                  onChange={(e) => setItemTrocadoInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); inputTroca2Ref.current?.focus(); } }}
+                  style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }}
+                  required
+                />
+              </div>
+
+              <div style={{ marginBottom: "12px" }}>
+                <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Valor de Diferença (R$):</label>
+                <input
+                  ref={inputTroca2Ref}
+                  type="number"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={valorDiferencaInput}
+                  onChange={(e) => setValorDiferencaInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); inputTroca3Ref.current?.focus(); } }}
+                  style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }}
+                />
+              </div>
+
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Levou algo mais?</label>
+                <input
+                  ref={inputTroca3Ref}
+                  type="text"
+                  placeholder=""
+                  value={levouAlgoMaisInput}
+                  onChange={(e) => setLevouAlgoMaisInput(e.target.value)}
+                  style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button type="button" onClick={() => setModalTrocaInfoAberto(false)} style={{ flex: 1, padding: "10px", background: cores.bgCardSecundario, color: cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "4px", cursor: "pointer" }}>Cancelar</button>
+                <button type="submit" style={{ flex: 1, padding: "10px", background: "#e67e22", color: "#fff", border: "none", borderRadius: "4px", fontWeight: "bold", cursor: "pointer" }}>Continuar (Enter)</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {modalAVerInfoAberto && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
+          <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "400px", border: `1px solid ${cores.borda}` }}>
+            <h3 style={{ margin: "0 0 10px 0" }}>🛍️ Mercadoria a Ver / Prova</h3>
+            <p style={{ color: cores.textoSecundario, fontSize: "13px", margin: "0 0 15px 0" }}>Atualiza o estoque, exibe no caixa com valor R$ 0,00 e registra o pedido.</p>
+
+            <form onSubmit={confirmarAVerEProsseguir}>
+              <div style={{ marginBottom: "12px" }}>
+                <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Nome de quem pegou (Funcionário/Amigo/Cliente):</label>
+                <input
+                  ref={inputAVer1Ref}
+                  type="text"
+                  placeholder=""
+                  value={nomeResponsavelAVer}
+                  onChange={(e) => setNomeResponsavelAVer(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); inputAVer2Ref.current?.focus(); } }}
+                  style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }}
+                  required
+                />
+              </div>
+
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Observação:</label>
+                <input
+                  ref={inputAVer2Ref}
+                  type="text"
+                  placeholder=""
+                  value={observacaoAVer}
+                  onChange={(e) => setObservacaoAVer(e.target.value)}
+                  style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button type="button" onClick={() => setModalAVerInfoAberto(false)} style={{ flex: 1, padding: "10px", background: cores.bgCardSecundario, color: cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "4px", cursor: "pointer" }}>Cancelar</button>
+                <button type="submit" style={{ flex: 1, padding: "10px", background: "#8e44ad", color: "#fff", border: "none", borderRadius: "4px", fontWeight: "bold", cursor: "pointer" }}>Salvar Registro</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {itemEditandoPreco && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
           <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "340px", border: `1px solid ${cores.borda}` }}>
@@ -519,7 +795,6 @@ export default function Pdv({
         </div>
       )}
 
-      {/* MODAL DESCONTO */}
       {modalDescontoAberto && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
           <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "360px", border: `1px solid ${cores.borda}`, boxShadow: "0 6px 25px rgba(0,0,0,0.7)" }}>
@@ -566,18 +841,17 @@ export default function Pdv({
         </div>
       )}
 
-      {/* MODAL FORMA DE PAGAMENTO */}
       {modalFormaPagtoAberto && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
           <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "360px", border: `1px solid ${cores.borda}`, boxShadow: "0 6px 25px rgba(0,0,0,0.7)" }}>
             <h3 style={{ margin: "0 0 10px 0" }}>💳 Escolha a Forma de Pagamento</h3>
             <p style={{ color: cores.textoSecundario, fontSize: "13px", margin: "0 0 15px 0" }}>
-              Total a pagar: <strong style={{ color: "#28a745", fontSize: "16px" }}>R$ {subtotalComDesconto.toFixed(2)}</strong> <br />
+              Total a pagar: <strong style={{ color: corModo, fontSize: "16px" }}>R$ {(tipoTabela === "troca" ? Math.max(0, subtotalComDesconto + (Number(valorDiferencaInput) || 0)) : subtotalComDesconto).toFixed(2)}</strong> <br />
               <span style={{ color: cores.textoSuave }}>Navegue com [↑ / ↓] e confirme com [Enter]</span>
             </p>
 
             <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "15px" }}>
-              {FORMAS_PAGAMENTO.map((fp, idx) => {
+              {formasPagamentoDisponiveis.map((fp, idx) => {
                 const focado = idx === indiceFormaPagto;
                 return (
                   <div
@@ -585,7 +859,11 @@ export default function Pdv({
                     onClick={() => {
                       setIndiceFormaPagto(idx);
                       setModalFormaPagtoAberto(false);
-                      if (fp === "Cartão de Crédito") {
+                      if (fp === "Troca") {
+                        const diferencaNum = Number(valorDiferencaInput) || 0;
+                        const valorFinalTroca = Math.max(0, subtotalComDesconto + diferencaNum);
+                        executarVendaNoBanco(valorFinalTroca, "Troca", null, null);
+                      } else if (fp === "Cartão de Crédito") {
                         setIndiceParcela(0);
                         setModalCartaoAberto(true);
                       } else if (fp === "Dinheiro") {
@@ -607,7 +885,7 @@ export default function Pdv({
                     }}
                   >
                     <strong style={{ fontSize: "16px" }}>{fp}</strong>
-                    {focado && <span style={{ fontSize: "11px", background: "#007bff", color: "#fff", padding: "2px 6px", borderRadius: "3px" }}>Enter ↵</span>}
+                    {focado && <span style={{ fontSize: "11px", background: corModo, color: "#fff", padding: "2px 6px", borderRadius: "3px" }}>Enter ↵</span>}
                   </div>
                 );
               })}
@@ -624,7 +902,6 @@ export default function Pdv({
         </div>
       )}
 
-      {/* MODAL PARCELAS CRÉDITO */}
       {modalCartaoAberto && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
           <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "380px", border: `1px solid ${cores.borda}`, boxShadow: "0 6px 25px rgba(0,0,0,0.7)" }}>
@@ -682,7 +959,6 @@ export default function Pdv({
         </div>
       )}
 
-      {/* MODAL DINHEIRO E TROCO */}
       {modalDinheiroAberto && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
           <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "360px", border: `1px solid ${cores.borda}`, boxShadow: "0 6px 25px rgba(0,0,0,0.7)" }}>
@@ -706,7 +982,7 @@ export default function Pdv({
                 placeholder="Ex: 50.00"
                 value={valorEntregueInput}
                 onChange={(e) => setValorEntregueInput(e.target.value)}
-                style={{ width: "100%", padding: "14px", fontSize: "22px", fontWeight: "bold", textAlign: "center", background: cores.inputBg, border: `2px solid #007bff`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box", marginBottom: "15px", outline: "none" }}
+                style={{ width: "100%", padding: "14px", fontSize: "22px", fontWeight: "bold", textAlign: "center", background: cores.inputBg, border: `2px solid ${corModo}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box", marginBottom: "15px", outline: "none" }}
               />
 
               <div style={{ background: valorEntregueNum >= subtotalComDesconto ? "rgba(40, 167, 69, 0.15)" : "rgba(229, 62, 62, 0.15)", border: `1px solid ${valorEntregueNum >= subtotalComDesconto ? "#28a745" : "#e53e3e"}`, padding: "14px", borderRadius: "6px", textAlign: "center", marginBottom: "15px" }}>
@@ -718,7 +994,7 @@ export default function Pdv({
 
               <div style={{ display: "flex", gap: "10px" }}>
                 <button type="button" onClick={() => { setModalDinheiroAberto(false); setModalFormaPagtoAberto(true); }} style={{ flex: 1, padding: "10px", background: cores.bgCardSecundario, color: cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "4px", cursor: "pointer" }}>Voltar</button>
-                <button type="submit" disabled={processandoVenda || valorEntregueNum < subtotalComDesconto} style={{ flex: 1, padding: "10px", background: valorEntregueNum >= subtotalComDesconto ? "#28a745" : cores.bgCardSecundario, color: "#fff", border: "none", borderRadius: "4px", fontWeight: "bold", cursor: valorEntregueNum >= subtotalComDesconto ? "pointer" : "not-allowed" }}>
+                <button type="submit" disabled={processandoVenda || valorEntregueNum < subtotalComDesconto} style={{ flex: 1, padding: "10px", background: valorEntregueNum >= subtotalComDesconto ? corModo : cores.bgCardSecundario, color: "#fff", border: "none", borderRadius: "4px", fontWeight: "bold", cursor: valorEntregueNum >= subtotalComDesconto ? "pointer" : "not-allowed" }}>
                   Finalizar (Enter)
                 </button>
               </div>
@@ -727,15 +1003,14 @@ export default function Pdv({
         </div>
       )}
 
-      {/* MODAL QUANTIDADE DE PRODUTO */}
       {produtoModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
           <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "340px", border: `1px solid ${cores.borda}` }}>
             <h3 style={{ margin: "0 0 10px 0", fontSize: "18px" }}>Adicionar Item</h3>
             <p style={{ color: cores.textoSecundario, fontSize: "14px", margin: "0 0 15px 0" }}>
               <strong>{produtoModal.nome}</strong><br />
-              <span style={{ color: tipoTabela === "atacado" ? "#3182ce" : "#38a169", fontWeight: "bold" }}>
-                R$ {getPrecoAtual(produtoModal).toFixed(2)} ({tipoTabela.toUpperCase()})
+              <span style={{ color: corModo, fontWeight: "bold" }}>
+                R$ {tipoTabela === "a_ver" ? "0.00 (A Ver)" : `${getPrecoAtual(produtoModal).toFixed(2)} (${tipoTabela.toUpperCase()})`}
               </span> | Estoque: {produtoModal.estoque} un {produtoModal.permiteNegativo ? "(Sem trava)" : ""}
             </p>
 
@@ -753,7 +1028,7 @@ export default function Pdv({
 
               <div style={{ display: "flex", gap: "10px" }}>
                 <button type="button" onClick={() => setProdutoModal(null)} style={{ flex: 1, padding: "10px", background: cores.bgCardSecundario, color: cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "4px", cursor: "pointer" }}>Cancelar</button>
-                <button type="submit" style={{ flex: 1, padding: "10px", background: "#007bff", color: "#fff", border: "none", borderRadius: "4px", fontWeight: "bold", cursor: "pointer" }}>Confirmar (Enter)</button>
+                <button type="submit" style={{ flex: 1, padding: "10px", background: corModo, color: "#fff", border: "none", borderRadius: "4px", fontWeight: "bold", cursor: "pointer" }}>Confirmar (Enter)</button>
               </div>
             </form>
           </div>
@@ -763,20 +1038,32 @@ export default function Pdv({
       {/* ÁREA DA FRENTE DE CAIXA */}
       <div style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: "25px", width: "100%" }}>
         <div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: cores.bgCard, padding: "12px 16px", borderRadius: "6px", marginBottom: "20px", border: `1px solid ${cores.borda}` }}>
-            <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-              <span style={{ fontSize: "14px", fontWeight: "bold" }}>Modo de Venda:</span>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: cores.bgCard, padding: "12px 16px", borderRadius: "6px", marginBottom: "20px", border: `1px solid ${cores.borda}`, flexWrap: "wrap", gap: "10px" }}>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ fontSize: "14px", fontWeight: "bold", marginRight: "4px" }}>Modo de Venda:</span>
               <button
                 onClick={() => setTipoTabela("varejo")}
-                style={{ padding: "6px 16px", borderRadius: "4px", border: "none", cursor: "pointer", fontWeight: "bold", background: tipoTabela === "varejo" ? "#28a745" : cores.bgCardSecundario, color: tipoTabela === "varejo" ? "#fff" : cores.texto }}
+                style={{ padding: "6px 12px", borderRadius: "4px", border: "none", cursor: "pointer", fontWeight: "bold", background: tipoTabela === "varejo" ? "#28a745" : cores.bgCardSecundario, color: tipoTabela === "varejo" ? "#fff" : cores.texto }}
               >
-                Varejo
+                [1] Varejo
               </button>
               <button
                 onClick={() => setTipoTabela("atacado")}
-                style={{ padding: "6px 16px", borderRadius: "4px", border: "none", cursor: "pointer", fontWeight: "bold", background: tipoTabela === "atacado" ? "#007bff" : cores.bgCardSecundario, color: "#fff" }}
+                style={{ padding: "6px 12px", borderRadius: "4px", border: "none", cursor: "pointer", fontWeight: "bold", background: tipoTabela === "atacado" ? "#007bff" : cores.bgCardSecundario, color: tipoTabela === "atacado" ? "#fff" : cores.texto }}
               >
-                Atacado
+                [2] Atacado
+              </button>
+              <button
+                onClick={() => setTipoTabela("troca")}
+                style={{ padding: "6px 12px", borderRadius: "4px", border: "none", cursor: "pointer", fontWeight: "bold", background: tipoTabela === "troca" ? "#e67e22" : cores.bgCardSecundario, color: tipoTabela === "troca" ? "#fff" : cores.texto }}
+              >
+                [3] Troca
+              </button>
+              <button
+                onClick={() => setTipoTabela("a_ver")}
+                style={{ padding: "6px 12px", borderRadius: "4px", border: "none", cursor: "pointer", fontWeight: "bold", background: tipoTabela === "a_ver" ? "#8e44ad" : cores.bgCardSecundario, color: tipoTabela === "a_ver" ? "#fff" : cores.texto }}
+              >
+                [4] A Ver
               </button>
             </div>
             <button
@@ -799,7 +1086,7 @@ export default function Pdv({
                 width: "100%",
                 padding: "16px",
                 background: cores.inputBg,
-                border: "2px solid #007bff",
+                border: `2px solid ${corModo}`,
                 borderRadius: "8px",
                 color: cores.texto,
                 boxSizing: "border-box",
@@ -808,18 +1095,18 @@ export default function Pdv({
               }}
             />
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", fontSize: "12px", color: cores.textoSuave, padding: "0 4px" }}>
-              <span>{termo.length === 0 ? "Com a busca vazia: tecle Enter para Fechar ou Q para alterar preço" : "Navegue com as setas ↑ ↓"}</span>
+              <span>{termo.length === 0 ? "Com busca vazia: Use [1-4] ou [← / →] para modo, [Enter] para Finalizar, [Q] para preço" : "Navegue com setas ↑ ↓"}</span>
               <span>Pressione F1 para ver os atalhos</span>
             </div>
           </div>
 
           {termo.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "55vh", overflowY: "auto" }}>
+            <div ref={listaBuscaRef} style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "55vh", overflowY: "auto" }}>
               {produtosFiltrados.length === 0 ? (
                 <p style={{ color: cores.textoSuave, padding: "10px" }}>Nenhum produto com "{buscaPdv}".</p>
               ) : (
                 produtosFiltrados.map((p, idx) => {
-                  const precoCobrado = getPrecoAtual(p);
+                  const precoCobrado = tipoTabela === "a_ver" ? 0 : getPrecoAtual(p);
                   const focado = idx === indiceFocoBusca;
 
                   return (
@@ -833,17 +1120,17 @@ export default function Pdv({
                         background: focado ? cores.itemAtivoBg : cores.bgItem,
                         padding: "14px 18px",
                         borderRadius: "6px",
-                        border: focado ? `2px solid ${cores.itemAtivoBorda}` : `1px solid ${cores.borda}`,
+                        border: focado ? `2px solid ${corModo}` : `1px solid ${cores.borda}`,
                         cursor: "pointer"
                       }}
                     >
                       <div>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                           <strong style={{ fontSize: "16px", color: cores.texto }}>{p.nome}</strong>
-                          {focado && <span style={{ fontSize: "11px", background: "#007bff", color: "#fff", padding: "2px 6px", borderRadius: "3px" }}>Enter ↵</span>}
+                          {focado && <span style={{ fontSize: "11px", background: corModo, color: "#fff", padding: "2px 6px", borderRadius: "3px" }}>Enter ↵</span>}
                         </div>
                         <div style={{ color: cores.textoSecundario, fontSize: "13px", marginTop: "4px" }}>
-                          <span style={{ color: tipoTabela === "atacado" ? "#3182ce" : "#38a169", fontWeight: "bold" }}>
+                          <span style={{ color: corModo, fontWeight: "bold" }}>
                             R$ {precoCobrado.toFixed(2)}
                           </span>
                           {" | "}Estoque: {p.estoque} un {p.permiteNegativo ? "(Sem trava)" : ""}
@@ -851,7 +1138,7 @@ export default function Pdv({
                           {p.codigoBarras ? ` | Cód: ${p.codigoBarras}` : ""}
                         </div>
                       </div>
-                      <span style={{ background: focado ? "#007bff" : cores.bgCardSecundario, color: focado ? "#fff" : cores.texto, padding: "6px 12px", borderRadius: "4px", fontSize: "12px", fontWeight: "bold" }}>
+                      <span style={{ background: focado ? corModo : cores.bgCardSecundario, color: focado ? "#fff" : cores.texto, padding: "6px 12px", borderRadius: "4px", fontSize: "12px", fontWeight: "bold" }}>
                         + Adicionar
                       </span>
                     </div>
@@ -867,8 +1154,8 @@ export default function Pdv({
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${cores.borda}`, paddingBottom: "10px" }}>
               <h2 style={{ margin: 0, fontSize: "20px" }}>Itens da Venda</h2>
-              <span style={{ fontSize: "12px", background: tipoTabela === "atacado" ? "#007bff" : "#28a745", color: "#fff", padding: "3px 8px", borderRadius: "4px", fontWeight: "bold" }}>
-                {tipoTabela.toUpperCase()}
+              <span style={{ fontSize: "12px", background: corModo, color: "#fff", padding: "3px 8px", borderRadius: "4px", fontWeight: "bold" }}>
+                {tipoTabela === "a_ver" ? "MERCADORIA A VER" : tipoTabela.toUpperCase()}
               </span>
             </div>
 
@@ -882,15 +1169,17 @@ export default function Pdv({
                       <div>{item.nome}</div>
                       <div 
                         onClick={() => {
-                          setItemEditandoPreco(item);
-                          setNovoPrecoInput(item.precoUnitario.toString());
+                          if (tipoTabela !== "a_ver") {
+                            setItemEditandoPreco(item);
+                            setNovoPrecoInput(item.precoUnitario.toString());
+                          }
                         }}
-                        title="Clique para alterar o preço"
-                        style={{ fontSize: "12px", color: cores.textoSecundario, cursor: "pointer" }}
+                        title={tipoTabela !== "a_ver" ? "Clique para alterar o preço" : ""}
+                        style={{ fontSize: "12px", color: cores.textoSecundario, cursor: tipoTabela !== "a_ver" ? "pointer" : "default" }}
                       >
                         {item.referencia ? `Ref: ${item.referencia} | ` : ""}
-                        {item.quantidade}x <span style={{ color: "#3182ce", textDecoration: "underline" }}>R$ {Number(item.precoUnitario).toFixed(2)}</span> = <strong>R$ {(Number(item.precoUnitario) * item.quantidade).toFixed(2)}</strong> 
-                        <span style={{ fontSize: "10px", marginLeft: "5px", color: cores.textoSuave }}>(✏️ editar)</span>
+                        {item.quantidade}x <span style={{ color: corModo, textDecoration: tipoTabela !== "a_ver" ? "underline" : "none" }}>R$ {Number(item.precoUnitario).toFixed(2)}</span> = <strong>R$ {(Number(item.precoUnitario) * item.quantidade).toFixed(2)}</strong> 
+                        {tipoTabela !== "a_ver" && <span style={{ fontSize: "10px", marginLeft: "5px", color: cores.textoSuave }}>(✏️ editar)</span>}
                       </div>
                     </div>
                     <button onClick={() => removerDoCarrinho(item.id)} style={{ background: "#e53e3e", color: "#fff", border: "none", borderRadius: "4px", padding: "4px 8px", cursor: "pointer", fontSize: "12px" }}>✕</button>
@@ -901,7 +1190,7 @@ export default function Pdv({
           </div>
 
           <div style={{ borderTop: `2px solid ${cores.borda}`, paddingTop: "15px" }}>
-            {descontoAplicado.valor > 0 && (
+            {descontoAplicado.valor > 0 && tipoTabela !== "a_ver" && (
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
                 <span style={{ color: cores.textoSecundario, fontSize: "14px" }}>Desconto:</span>
                 <span style={{ color: "#e53e3e", fontWeight: "bold", fontSize: "15px" }}>
@@ -912,7 +1201,7 @@ export default function Pdv({
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
               <span style={{ fontSize: "18px" }}>Total da Venda:</span>
-              <span style={{ fontSize: "24px", fontWeight: "bold", color: "#28a745" }}>
+              <span style={{ fontSize: "24px", fontWeight: "bold", color: corModo }}>
                 R$ {subtotalComDesconto.toFixed(2)}
               </span>
             </div>
@@ -920,9 +1209,9 @@ export default function Pdv({
             <button
               onClick={iniciarFluxoFechamentoTeclado}
               disabled={processandoVenda || carrinho.length === 0}
-              style={{ width: "100%", padding: "14px", background: carrinho.length > 0 ? "#28a745" : cores.bgCardSecundario, color: "#fff", border: "none", borderRadius: "6px", fontSize: "16px", fontWeight: "bold", cursor: carrinho.length > 0 ? "pointer" : "not-allowed" }}
+              style={{ width: "100%", padding: "14px", background: carrinho.length > 0 ? corModo : cores.bgCardSecundario, color: "#fff", border: "none", borderRadius: "6px", fontSize: "16px", fontWeight: "bold", cursor: carrinho.length > 0 ? "pointer" : "not-allowed" }}
             >
-              {processandoVenda ? "Processando..." : "Finalizar Venda (Enter no campo vazio)"}
+              {processandoVenda ? "Processando..." : tipoTabela === "a_ver" ? "Registrar a Ver (Enter no campo vazio)" : tipoTabela === "troca" ? "Finalizar Troca (Enter no campo vazio)" : "Finalizar Venda (Enter no campo vazio)"}
             </button>
           </div>
         </div>

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { db } from "../firebase";
-import { doc, updateDoc, deleteDoc, setDoc, getDocs, collection, query, where } from "firebase/firestore";
+import { doc, updateDoc, deleteDoc, setDoc, collection } from "firebase/firestore";
 
 export default function Relatorio({
   vendas,
@@ -18,18 +18,14 @@ export default function Relatorio({
 }) {
   const lojaId = usuarioLogado?.uid || "loja_padrao";
 
-  // Estados do Modal de Edição de Venda
   const [vendaEditando, setVendaEditando] = useState(null);
   const [novaFormaPagamento, setNovaFormaPagamento] = useState("");
   const [novoTipoVenda, setNovoTipoVenda] = useState("varejo");
   const [novosItens, setNovosItens] = useState([]);
   
-  // Campos de Troca
-  const [infoTroca, setInfoTroca] = useState({
-    itemTrocado: "",
-    valorDiferenca: "",
-    levouAlgoMais: ""
-  });
+  const [modalAbertura, setModalAbertura] = useState(false);
+  const [trocoInicialInput, setTrocoInicialInput] = useState("0.00");
+  const [abrindoCaixa, setAbrindoCaixa] = useState(false);
 
   const [salvandoEdicao, setSalvandoEdicao] = useState(false);
   const [processandoLimpeza, setProcessandoLimpeza] = useState(false);
@@ -45,7 +41,6 @@ export default function Relatorio({
     fontSize: "13px"
   };
 
-  // Vendas do caixa atual
   const vendasDoCaixaAtual = vendas.filter((v) => {
     if (!caixaAberto || !v.data) return false;
     const dataVenda = v.data.toDate ? v.data.toDate() : new Date(v.data);
@@ -53,7 +48,6 @@ export default function Relatorio({
     return dataVenda >= dataCaixaAbertura;
   });
 
-  // Cálculo dos totais por forma de pagamento no caixa atual
   let totalDinheiro = 0;
   let totalPix = 0;
   let totalCartao = 0;
@@ -73,7 +67,6 @@ export default function Relatorio({
     setNovaFormaPagamento(v.formaPagamento || "Dinheiro");
     setNovoTipoVenda(v.tipoVenda || "varejo");
     setNovosItens(v.itens ? [...v.itens] : []);
-    setInfoTroca(v.infoTroca || { itemTrocado: "", valorDiferenca: "", levouAlgoMais: "" });
   }
 
   async function handleSalvarEdicaoVenda(e) {
@@ -84,7 +77,7 @@ export default function Relatorio({
     try {
       const vendaRef = doc(db, "vendas", vendaEditando.id);
       const subtotalAtual = novosItens.reduce((acc, it) => acc + (Number(it.quantidade) * Number(it.precoUnitario)), 0);
-      const diferencaNum = Number(infoTroca.valorDiferenca) || 0;
+      const diferencaNum = Number(vendaEditando.infoTroca?.valorDiferenca) || 0;
       const totalFinal = subtotalAtual + diferencaNum;
 
       const dadosAtualizados = {
@@ -93,11 +86,6 @@ export default function Relatorio({
         itens: novosItens,
         subtotalBruto: subtotalAtual,
         total: totalFinal,
-        infoTroca: {
-          itemTrocado: infoTroca.itemTrocado.trim(),
-          valorDiferenca: diferencaNum,
-          levouAlgoMais: infoTroca.levouAlgoMais.trim()
-        },
         editadoEm: new Date()
       };
 
@@ -135,8 +123,8 @@ export default function Relatorio({
         total: venda.total,
         formaPagamento: venda.formaPagamento,
         tipoVenda: venda.tipoVenda || "varejo",
-        infoParcelas: venda.infoParcelas || null,
-        infoDinheiro: venda.infoDinheiro || null
+        infoParcelas: venda.parcelas || null,
+        infoDinheiro: venda.dadosDinheiro || null
       });
       setTimeout(() => {
         window.print();
@@ -144,9 +132,42 @@ export default function Relatorio({
     }
   }
 
-  function emitirFechamentoPdf() {
-    const dataHoje = caixaAberto?.dataString || new Date().toLocaleDateString("pt-BR");
-    const horaFechamento = new Date().toLocaleTimeString("pt-BR");
+  async function handleAbrirCaixa(e) {
+    e.preventDefault();
+    setAbrindoCaixa(true);
+    try {
+      const dataHojeStr = new Date().toLocaleDateString("pt-BR");
+      const novoCaixaRef = doc(collection(db, "caixas"));
+      const dadosNovoCaixa = {
+        lojaId,
+        status: "aberto",
+        abertoEm: new Date(),
+        dataString: dataHojeStr,
+        trocoInicial: Number(trocoInicialInput) || 0
+      };
+
+      await setDoc(novoCaixaRef, dadosNovoCaixa);
+      setCaixaAberto({ id: novoCaixaRef.id, ...dadosNovoCaixa });
+      setModalAbertura(false);
+      setTrocoInicialInput("0.00");
+      await recarregarDados();
+      alert("Caixa aberto com sucesso!");
+    } catch (err) {
+      alert("Erro ao abrir caixa: " + err.message);
+    } finally {
+      setAbrindoCaixa(false);
+    }
+  }
+
+  async function emitirFechamentoPdfEFecharCaixa() {
+    if (!caixaAberto) {
+      alert("Não há caixa aberto no momento!");
+      return;
+    }
+
+    const agora = new Date();
+    const dataHoje = caixaAberto?.dataString || agora.toLocaleDateString("pt-BR");
+    const horaFechamento = agora.toLocaleTimeString("pt-BR");
 
     document.title = `vendas ${dataHoje.replace(/\//g, '-')}`;
 
@@ -163,12 +184,28 @@ export default function Relatorio({
       vendas: vendasDoCaixaAtual
     });
 
+    try {
+      const caixaRef = doc(db, "caixas", caixaAberto.id);
+      await updateDoc(caixaRef, {
+        status: "fechado",
+        fechadoEm: agora,
+        totalVendido: somaTotalCaixa,
+        dinheiro: totalDinheiro,
+        pix: totalPix,
+        cartao: totalCartao
+      });
+
+      setCaixaAberto(null);
+      await recarregarDados();
+    } catch (err) {
+      console.error("Erro ao fechar caixa no banco:", err);
+    }
+
     setTimeout(() => {
       window.print();
     }, 300);
   }
 
-  // Rotina para limpar vendas com mais de 30 dias (Arquivamento e Otimização)
   async function handleLimparVendasAntigas() {
     if (!confirm("Deseja arquivar e limpar do sistema as vendas com mais de 30 dias para liberar memória?")) return;
     setProcessandoLimpeza(true);
@@ -207,13 +244,26 @@ export default function Relatorio({
     <div style={{ width: "100%", boxSizing: "border-box" }}>
       <h2 style={{ color: cores.texto, marginTop: 0 }}>📊 Relatórios & Fechamento de Caixa</h2>
 
-      {/* CAIXA ATUAL */}
       <div style={{ marginBottom: "40px" }}>
-        <h3 style={{ color: cores.texto, fontSize: "18px" }}>Caixa Atual ({caixaAberto ? caixaAberto.dataString : "Fechado"})</h3>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "15px" }}>
+          <h3 style={{ color: cores.texto, fontSize: "18px", margin: 0 }}>
+            Caixa Atual ({caixaAberto ? caixaAberto.dataString : "Fechado"})
+          </h3>
+          
+          <div>
+            {!caixaAberto && (
+              <button
+                onClick={() => setModalAbertura(true)}
+                style={{ background: "#28a745", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "14px" }}
+              >
+                🔓 Abrir Caixa
+              </button>
+            )}
+          </div>
+        </div>
         
         {caixaAberto ? (
           <div>
-            {/* CARDS DE RESUMO FINANCEIRO */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "15px", marginBottom: "20px" }}>
               <div style={{ border: `1px solid ${cores.borda}`, padding: "15px", borderRadius: "8px" }}>
                 <span style={{ fontSize: "12px", color: cores.textoSecundario }}>💵 Dinheiro</span>
@@ -235,21 +285,21 @@ export default function Relatorio({
 
             <div style={{ display: "flex", gap: "15px", marginBottom: "25px", flexWrap: "wrap" }}>
               <button 
-                onClick={emitirFechamentoPdf}
-                style={{ background: "#007bff", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}
+                onClick={emitirFechamentoPdfEFecharCaixa}
+                style={{ background: "#e53e3e", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}
               >
-                🖨️ Imprimir / Salvar Fechamento (vendas [data])
+                🔒 Fechar Caixa & Imprimir / Salvar PDF
               </button>
             </div>
 
-            <h4 style={{ color: cores.texto, fontSize: "16px", marginTop: "20px" }}>Vendas Registradas no Caixa Atual</h4>
+            <h4 style={{ color: cores.texto, fontSize: "16px", marginTop: "20px" }}>Vendas e Movimentos Registrados no Caixa Atual</h4>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", background: "transparent" }}>
                 <thead>
                   <tr style={{ borderBottom: `2px solid ${cores.borda}`, color: cores.texto }}>
                     <th style={{ padding: "10px" }}>Hora</th>
                     <th style={{ padding: "10px" }}>Modo</th>
-                    <th style={{ padding: "10px" }}>Itens / Troca</th>
+                    <th style={{ padding: "10px" }}>Itens / Observações</th>
                     <th style={{ padding: "10px" }}>Pagamento</th>
                     <th style={{ padding: "10px" }}>Total</th>
                     <th style={{ padding: "10px", textAlign: "center" }}>Ações</th>
@@ -271,34 +321,37 @@ export default function Relatorio({
                         <td style={{ padding: "10px" }}>{(v.tipoVenda || "varejo").toUpperCase()}</td>
                         <td style={{ padding: "10px" }}>
                           {v.itens?.map((it, idx) => (
-                            <span key={idx} style={{ display: "block", fontSize: "12px" }}>{it.quantidade}x {it.nome} (R$ {Number(it.precoUnitario).toFixed(2)})</span>
+                            <span key={idx} style={{ display: "block", fontSize: "12px" }}>{it.quantidade}x {it.nome}</span>
                           ))}
                           {v.infoTroca?.itemTrocado && (
-                            <div style={{ marginTop: "4px", fontSize: "11px", color: "#ff9f43", fontWeight: "bold" }}>
-                              🔄 Troca: {v.infoTroca.itemTrocado} | Dif: R$ {Number(v.infoTroca.valorDiferenca || 0).toFixed(2)}
-                              {v.infoTroca.levouAlgoMais && ` | Levou: ${v.infoTroca.levouAlgoMais}`}
+                            <div style={{ marginTop: "4px", fontSize: "11px", color: v.tipoVenda === "a_ver" ? "#8e44ad" : "#ff9f43", fontWeight: "bold" }}>
+                              {v.tipoVenda === "a_ver" ? `📌 [A Ver] ${v.infoTroca.itemTrocado}` : `🔄 Troca: ${v.infoTroca.itemTrocado} | Dif: R$ ${Number(v.infoTroca.valorDiferenca || 0).toFixed(2)}${v.infoTroca.levouAlgoMais ? ` | Levou: ${v.infoTroca.levouAlgoMais}` : ""}`}
                             </div>
                           )}
                         </td>
                         <td style={{ padding: "10px" }}>{v.formaPagamento}</td>
-                        <td style={{ padding: "10px", fontWeight: "bold" }}>R$ {Number(v.total || 0).toFixed(2)}</td>
+                        <td style={{ padding: "10px", fontWeight: "bold", color: Number(v.total || 0) === 0 ? "#8e44ad" : cores.texto }}>
+                          R$ {Number(v.total || 0).toFixed(2)}
+                        </td>
                         <td style={{ padding: "10px", textAlign: "center" }}>
-                          <div style={{ display: "flex", justifyContent: "center", gap: "6px" }}>
-                            <button 
-                              onClick={() => abrirEdicaoVenda(v)}
-                              style={{ background: "#ffc107", color: "#000", border: "none", borderRadius: "4px", padding: "5px 10px", cursor: "pointer", fontSize: "11px", fontWeight: "bold" }}
-                            >
-                              Editar
-                            </button>
+                          <div style={{ display: "flex", justifyContent: "center", gap: "6px", flexWrap: "wrap" }}>
+                            {v.tipoVenda !== "a_ver" && (
+                              <button 
+                                onClick={() => abrirEdicaoVenda(v)}
+                                style={{ background: "#ffc107", color: "#000", border: "none", borderRadius: "4px", padding: "5px 8px", cursor: "pointer", fontSize: "11px", fontWeight: "bold" }}
+                              >
+                                Editar
+                              </button>
+                            )}
                             <button 
                               onClick={() => reimprimirCupom(v)}
-                              style={{ background: "#6c757d", color: "#fff", border: "none", borderRadius: "4px", padding: "5px 10px", cursor: "pointer", fontSize: "11px", fontWeight: "bold" }}
+                              style={{ background: "#6c757d", color: "#fff", border: "none", borderRadius: "4px", padding: "5px 8px", cursor: "pointer", fontSize: "11px", fontWeight: "bold" }}
                             >
                               Reimprimir
                             </button>
                             <button 
                               onClick={() => handleExcluirVenda(v.id)}
-                              style={{ background: "#e53e3e", color: "#fff", border: "none", borderRadius: "4px", padding: "5px 10px", cursor: "pointer", fontSize: "11px", fontWeight: "bold" }}
+                              style={{ background: "#e53e3e", color: "#fff", border: "none", borderRadius: "4px", padding: "5px 8px", cursor: "pointer", fontSize: "11px", fontWeight: "bold" }}
                             >
                               Excluir
                             </button>
@@ -312,11 +365,18 @@ export default function Relatorio({
             </div>
           </div>
         ) : (
-          <p style={{ color: cores.textoSecundario }}>O caixa está fechado no momento.</p>
+          <div style={{ padding: "20px", background: cores.bgCardSecundario, borderRadius: "8px", textAlign: "center" }}>
+            <p style={{ color: cores.textoSecundario, marginBottom: "15px" }}>O caixa está fechado no momento.</p>
+            <button
+              onClick={() => setModalAbertura(true)}
+              style={{ background: "#28a745", color: "#fff", border: "none", padding: "10px 20px", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "14px" }}
+            >
+              🔓 Abrir Caixa Agora
+            </button>
+          </div>
         )}
       </div>
 
-      {/* SEÇÃO DE ARQUIVAMENTO E LIMPEZA DE 30 DIAS */}
       <div style={{ borderTop: `1px solid ${cores.borda}`, paddingTop: "25px", marginTop: "30px" }}>
         <h3 style={{ color: cores.texto, fontSize: "16px" }}>🗄️ Manutenção & Histórico (+30 Dias)</h3>
         <p style={{ color: cores.textoSecundario, fontSize: "13px", marginBottom: "15px" }}>
@@ -331,11 +391,47 @@ export default function Relatorio({
         </button>
       </div>
 
-      {/* MODAL DE EDIÇÃO DE VENDA & TROCA */}
+      {modalAbertura && (
+        <div style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh", background: "rgba(0,0,0,0.7)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000, padding: "20px", boxSizing: "border-box" }}>
+          <div style={{ background: cores.bgGeral, border: `1px solid ${cores.borda}`, padding: "25px", borderRadius: "12px", width: "100%", maxWidth: "400px" }}>
+            <h3 style={{ color: cores.texto, marginTop: 0 }}>🔓 Abertura de Caixa Diário</h3>
+            <form onSubmit={handleAbrirCaixa}>
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ display: "block", fontSize: "13px", color: cores.textoSecundario, marginBottom: "5px" }}>Fundo de Troco Inicial (R$):</label>
+                <input 
+                  type="number" 
+                  step="0.01" 
+                  value={trocoInicialInput} 
+                  onChange={(e) => setTrocoInicialInput(e.target.value)} 
+                  style={inputStyle} 
+                  required 
+                />
+              </div>
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button 
+                  type="submit" 
+                  disabled={abrindoCaixa} 
+                  style={{ flex: 1, padding: "10px", background: "#28a745", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}
+                >
+                  {abrindoCaixa ? "Abrindo..." : "Confirmar Abertura"}
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => setModalAbertura(false)} 
+                  style={{ flex: 1, padding: "10px", background: "#6c757d", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {vendaEditando && (
         <div style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh", background: "rgba(0,0,0,0.7)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000, padding: "20px", boxSizing: "border-box" }}>
           <div style={{ background: cores.bgGeral, border: `1px solid ${cores.borda}`, padding: "25px", borderRadius: "12px", width: "100%", maxWidth: "600px", maxHeight: "90vh", overflowY: "auto" }}>
-            <h3 style={{ color: cores.texto, marginTop: 0 }}>✏️ Editar Venda / Registrar Troca</h3>
+            <h3 style={{ color: cores.texto, marginTop: 0 }}>✏️ Editar Venda Atual</h3>
             
             <form onSubmit={handleSalvarEdicaoVenda}>
               <div style={{ marginBottom: "15px" }}>
@@ -349,6 +445,8 @@ export default function Relatorio({
                   <option value="Pix" style={{ background: cores.bgGeral }}>Pix</option>
                   <option value="Cartão Débito" style={{ background: cores.bgGeral }}>Cartão Débito</option>
                   <option value="Cartão Crédito" style={{ background: cores.bgGeral }}>Cartão Crédito</option>
+                  <option value="Troca" style={{ background: cores.bgGeral }}>Troca</option>
+                  <option value="A Ver" style={{ background: cores.bgGeral }}>A Ver</option>
                 </select>
               </div>
 
@@ -361,6 +459,8 @@ export default function Relatorio({
                 >
                   <option value="varejo" style={{ background: cores.bgGeral }}>Varejo</option>
                   <option value="atacado" style={{ background: cores.bgGeral }}>Atacado</option>
+                  <option value="troca" style={{ background: cores.bgGeral }}>Troca</option>
+                  <option value="a_ver" style={{ background: cores.bgGeral }}>A Ver</option>
                 </select>
               </div>
 
@@ -401,45 +501,6 @@ export default function Relatorio({
                   </button>
                 </div>
               ))}
-
-              <div style={{ borderTop: `1px solid ${cores.borda}`, marginTop: "20px", paddingTop: "15px" }}>
-                <h4 style={{ color: cores.texto, fontSize: "14px", marginBottom: "10px" }}>🔄 Opção de Troca / Diferença</h4>
-                
-                <div style={{ marginBottom: "12px" }}>
-                  <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>O que foi trocado?</label>
-                  <input 
-                    type="text" 
-                    placeholder="Ex: Camisa GG por G" 
-                    value={infoTroca.itemTrocado} 
-                    onChange={(e) => setInfoTroca({ ...infoTroca, itemTrocado: e.target.value })}
-                    style={inputStyle}
-                  />
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "15px" }}>
-                  <div>
-                    <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Valor de Diferença (R$):</label>
-                    <input 
-                      type="number" 
-                      step="0.01" 
-                      placeholder="Ex: 15.00 ou -10.00" 
-                      value={infoTroca.valorDiferenca} 
-                      onChange={(e) => setInfoTroca({ ...infoTroca, valorDiferenca: e.target.value })}
-                      style={inputStyle}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Levou algo mais?</label>
-                    <input 
-                      type="text" 
-                      placeholder="Ex: Boné adicional" 
-                      value={infoTroca.levouAlgoMais} 
-                      onChange={(e) => setInfoTroca({ ...infoTroca, levouAlgoMais: e.target.value })}
-                      style={inputStyle}
-                    />
-                  </div>
-                </div>
-              </div>
 
               <div style={{ display: "flex", gap: "10px", marginTop: "20px" }}>
                 <button 

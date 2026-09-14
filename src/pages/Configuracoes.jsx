@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { db } from "../firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
-export default function Configuracoes({ usuarioLogado, cores }) {
+export default function Configuracoes({ usuarioLogado, cores, recarregarConfigLoja }) {
   const lojaId = usuarioLogado?.uid || "loja_padrao";
 
   const [nomeLoja, setNomeLoja] = useState("LIFESURF");
@@ -44,7 +44,11 @@ export default function Configuracoes({ usuarioLogado, cores }) {
         mensagemRodape,
         atualizadoEm: new Date()
       }, { merge: true });
-      alert("Configurações salvas com sucesso!");
+
+      alert("Configurações e cupom atualizados com sucesso!");
+      if (recarregarConfigLoja) {
+        await recarregarConfigLoja();
+      }
     } catch (err) {
       alert("Erro ao salvar: " + err.message);
     } finally {
@@ -56,9 +60,8 @@ export default function Configuracoes({ usuarioLogado, cores }) {
     <div style={{ width: "100%", boxSizing: "border-box", background: cores.bgCard, padding: "25px", borderRadius: "12px", border: `1px solid ${cores.borda}` }}>
       <h2 style={{ color: cores.texto, marginTop: 0 }}>⚙️ Configurações da Loja & Cupom</h2>
       <p style={{ color: cores.textoSecundario, fontSize: "13px", marginBottom: "20px" }}>
-        Personalize o nome, a logo e as informações que saem no cupom não fiscal impresso para os seus clientes.
+        Personalize o nome, a logo e as informações que saem no cupom impresso para os seus clientes.
       </p>
-      {/* O formulário continua igual abaixo... */}
 
       <form onSubmit={handleSalvar}>
         <div style={{ marginBottom: "15px" }}>
@@ -80,7 +83,7 @@ export default function Configuracoes({ usuarioLogado, cores }) {
             onChange={(e) => setLogoUrl(e.target.value)}
             style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.bordaClara}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }}
           />
-          <small style={{ color: cores.textoSuave, fontSize: "11px" }}>Dica: Cole um link direto de imagem (PNG/JPG) hospedada na web para aparecer no topo do cupom.</small>
+          <small style={{ color: cores.textoSuave, fontSize: "11px" }}>Dica: Cole um link direto de imagem hospedada na web para aparecer no topo do cupom.</small>
         </div>
 
         {logoUrl && (
