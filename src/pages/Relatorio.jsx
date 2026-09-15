@@ -2,6 +2,8 @@ import { useState } from "react";
 import { db } from "../firebase";
 import { doc, updateDoc, deleteDoc, setDoc, collection } from "firebase/firestore";
 
+const EMAILS_COMPARTILHADOS = ["jarbasantonio201@gmail.com", "lucasesilva438@gmail.com"];
+
 export default function Relatorio({
   vendas,
   caixaAberto,
@@ -16,7 +18,8 @@ export default function Relatorio({
   setDadosFechamentoPdf,
   setDadosRecibo
 }) {
-  const lojaId = usuarioLogado?.uid || "loja_padrao";
+  const isCompartilhado = usuarioLogado?.email && EMAILS_COMPARTILHADOS.includes(usuarioLogado.email);
+  const lojaId = isCompartilhado ? "compartilhado_jarbas_lucas" : (usuarioLogado?.uid || "loja_padrao");
 
   const [vendaEditando, setVendaEditando] = useState(null);
   const [novaFormaPagamento, setNovaFormaPagamento] = useState("");

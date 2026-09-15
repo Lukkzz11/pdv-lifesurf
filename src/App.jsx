@@ -1,25 +1,17 @@
 import { useEffect, useState } from "react";
 import { db, auth } from "./firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { 
-  collection, 
-  getDocs, 
-  doc, 
-  getDoc 
-} from "firebase/firestore";
+import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 
-// Páginas Modularizadas
 import Login from "./pages/Login";
-import Pdv from "./pages/Pdv";
-import Estoque from "./pages/Estoque";
-import Relatorio from "./pages/Relatorio";
-import Configuracoes from "./pages/Configuracoes";
+import HomePrincipal from "./pages/HomePrincipal";
+
+const EMAILS_COMPARTILHADOS = ["jarbasantonio201@gmail.com", "lucasesilva438@gmail.com"];
 
 export default function App() {
   const [usuarioLogado, setUsuarioLogado] = useState(null);
   const [verificandoAuth, setVerificandoAuth] = useState(true);
 
-  const [abaAtiva, setAbaAtiva] = useState("menu");
   const [tema, setTema] = useState(() => localStorage.getItem("tema_lifesurf") || "dark");
   const [produtos, setProdutos] = useState([]);
   const [vendas, setVendas] = useState([]);
@@ -27,7 +19,6 @@ export default function App() {
   const [ultimoFechamentoSalvo, setUltimoFechamentoSalvo] = useState(null);
   const [totalHistoricoConsolidado, setTotalHistoricoConsolidado] = useState(0);
 
-  // Configurações da Loja para o Cupom
   const [configLoja, setConfigLoja] = useState({
     nomeLoja: "LIFESURF",
     logoUrl: "",
@@ -36,12 +27,10 @@ export default function App() {
     mensagemRodape: "OBRIGADO PELA PREFERENCIA! VOLTE SEMPRE!"
   });
 
-  // Estados de Impressão Global
   const [dadosRecibo, setDadosRecibo] = useState(null);
   const [dadosFechamentoPdf, setDadosFechamentoPdf] = useState(null);
   const [dadosRelatorioProdutosPdf, setDadosRelatorioProdutosPdf] = useState(false);
 
-  // Escuta autenticação
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUsuarioLogado(user);
@@ -92,10 +81,10 @@ export default function App() {
 
   async function carregarDados() {
     if (!usuarioLogado) return;
-    const lojaId = usuarioLogado.uid;
+    const isCompartilhado = usuarioLogado?.email && EMAILS_COMPARTILHADOS.includes(usuarioLogado.email);
+    const lojaId = isCompartilhado ? "compartilhado_jarbas_lucas" : usuarioLogado.uid;
 
     try {
-      // Carrega Configurações da Loja
       const docConfigRef = doc(db, "configuracoes", lojaId);
       const snapConfig = await getDoc(docConfigRef);
       if (snapConfig.exists()) {
@@ -111,7 +100,16 @@ export default function App() {
 
       const snapProdutos = await getDocs(collection(db, "produtos"));
       const listaProdutos = snapProdutos.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setProdutos(listaProdutos.filter(p => !p.lojaId || p.lojaId === lojaId));
+      
+      setProdutos(listaProdutos.filter(p => {
+        if (isCompartilhado) {
+          // Permite que os e-mails compartilhados vejam todos os produtos antigos e novos
+          return true;
+        } else {
+          // Novos perfis iniciam totalmente zerados
+          return p.lojaId === usuarioLogado.uid;
+        }
+      }));
 
       const snapVendas = await getDocs(collection(db, "vendas"));
       const listaVendas = snapVendas.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -120,15 +118,32 @@ export default function App() {
         const tB = b.data?.toMillis ? b.data.toMillis() : 0;
         return tB - tA;
       });
-      setVendas(listaVendas.filter(v => !v.lojaId || v.lojaId === lojaId));
+      
+      setVendas(listaVendas.filter(v => {
+        if (isCompartilhado) {
+          return true;
+        } else {
+          return v.lojaId === usuarioLogado.uid;
+        }
+      }));
 
       const snapCaixas = await getDocs(collection(db, "caixas"));
       const listaCaixas = snapCaixas.docs.map((d) => ({ id: d.id, ...d.data() }));
       
-      const caixaAbertoEncontrado = listaCaixas.find(c => c.status === "aberto" && (!c.lojaId || c.lojaId === lojaId));
+      const caixaAbertoEncontrado = listaCaixas.find(c => {
+        const matchLoja = isCompartilhado 
+          ? true 
+          : (c.lojaId === usuarioLogado.uid);
+        return c.status === "aberto" && matchLoja;
+      });
       setCaixaAberto(caixaAbertoEncontrado || null);
 
-      const caixasFechados = listaCaixas.filter(c => c.status === "fechado" && (!c.lojaId || c.lojaId === lojaId));
+      const caixasFechados = listaCaixas.filter(c => {
+        const matchLoja = isCompartilhado 
+          ? true 
+          : (c.lojaId === usuarioLogado.uid);
+        return c.status === "fechado" && matchLoja;
+      });
       caixasFechados.sort((a, b) => {
         const tA = a.fechadoEm?.toMillis ? a.fechadoEm.toMillis() : 0;
         const tB = b.fechadoEm?.toMillis ? b.fechadoEm.toMillis() : 0;
@@ -144,12 +159,7 @@ export default function App() {
       if (consDoc.exists()) {
         setTotalHistoricoConsolidado(consDoc.data().totalAcumulado || 0);
       } else {
-        const consGeral = await getDoc(doc(db, "configuracoes", "historicoConsolidado"));
-        if (consGeral.exists()) {
-          setTotalHistoricoConsolidado(consGeral.data().totalAcumulado || 0);
-        } else {
-          setTotalHistoricoConsolidado(0);
-        }
+        setTotalHistoricoConsolidado(0);
       }
     } catch (err) {
       console.error("Erro ao carregar dados do Firebase:", err);
@@ -415,153 +425,26 @@ export default function App() {
         </div>
       )}
 
-      {/* ÁREA DA APLICAÇÃO VISÍVEL (100% LARGURA DA TELA) */}
-      <div className="no-print" style={{ width: "100vw", minHeight: "100vh", padding: "20px", boxSizing: "border-box", fontFamily: "sans-serif", background: cores.bgGeral, color: cores.texto, margin: 0 }}>
-        
-        {/* CABEÇALHO DO SISTEMA */}
-        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${cores.borda}`, paddingBottom: "15px", marginBottom: "20px", width: "100%" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <h1 style={{ margin: 0, fontSize: "22px", color: cores.texto }}>PDV</h1>
-            <span style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "12px", background: caixaAberto ? "#28a745" : "#e53e3e", color: "#fff", fontWeight: "bold" }}>
-              {caixaAberto ? `Caixa Aberto (${caixaAberto.dataString})` : "Caixa Fechado"}
-            </span>
-            <span style={{ fontSize: "12px", color: cores.textoSecundario, borderLeft: `1px solid ${cores.bordaClara}`, paddingLeft: "10px" }}>
-              👤 {usuarioLogado?.email}
-            </span>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            {abaAtiva !== "menu" && (
-              <button
-                onClick={() => setAbaAtiva("menu")}
-                style={{ padding: "8px 14px", borderRadius: "6px", border: `1px solid ${cores.borda}`, background: cores.bgCardSecundario, color: cores.texto, cursor: "pointer", fontWeight: "bold", fontSize: "13px" }}
-              >
-                🏠 Menu Principal
-              </button>
-            )}
-
-            <button
-              onClick={alternarTema}
-              style={{ padding: "8px 12px", borderRadius: "6px", border: `1px solid ${cores.borda}`, background: cores.bgCard, color: cores.texto, cursor: "pointer", fontSize: "13px" }}
-            >
-              {tema === "dark" ? "☀️" : "🌙"}
-            </button>
-            <button
-              onClick={handleLogout}
-              style={{ padding: "8px 14px", borderRadius: "6px", border: "none", background: "#e53e35", color: "#fff", cursor: "pointer", fontSize: "13px", fontWeight: "bold" }}
-            >
-              Sair 🚪
-            </button>
-          </div>
-        </header>
-
-        {/* 1. TELA DE MENU PRINCIPAL */}
-        {abaAtiva === "menu" && (
-          <div style={{ width: "100%", padding: "40px 20px", boxSizing: "border-box", textAlign: "center" }}>
-            <h1 style={{ marginBottom: "10px", color: cores.texto, fontSize: "28px" }}>Escolha uma Opção</h1>
-            <p style={{ color: cores.textoSecundario, marginBottom: "40px", fontSize: "15px" }}>Gerencie sua frente de caixa, estoque e relatórios de forma isolada.</p>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "25px", width: "100%" }}>
-              <div 
-                onClick={() => setAbaAtiva("pdv")}
-                style={{ background: "transparent", padding: "35px 20px", borderRadius: "12px", cursor: "pointer", border: `2px solid #28a745`, transition: "0.2s" }}
-              >
-                <div style={{ fontSize: "40px", marginBottom: "12px" }}>🛒</div>
-                <h3 style={{ margin: "0 0 8px 0", color: cores.texto, fontSize: "18px" }}>Frente de Caixa (PDV)</h3>
-                <p style={{ fontSize: "13px", color: cores.textoSecundario, margin: 0 }}>Realizar vendas e emitir cupons</p>
-              </div>
-
-              <div 
-                onClick={() => setAbaAtiva("estoque")}
-                style={{ background: "transparent", padding: "35px 20px", borderRadius: "12px", cursor: "pointer", border: `2px solid #007bff`, transition: "0.2s" }}
-              >
-                <div style={{ fontSize: "40px", marginBottom: "12px" }}>📦</div>
-                <h3 style={{ margin: "0 0 8px 0", color: cores.texto, fontSize: "18px" }}>Produtos e Estoque</h3>
-                <p style={{ fontSize: "13px", color: cores.textoSecundario, margin: 0 }}>Cadastrar e gerenciar produtos</p>
-              </div>
-
-              <div 
-                onClick={() => {
-                  carregarDados();
-                  setAbaAtiva("historico");
-                }}
-                style={{ background: "transparent", padding: "35px 20px", borderRadius: "12px", cursor: "pointer", border: `2px solid #ffc107`, transition: "0.2s" }}
-              >
-                <div style={{ fontSize: "40px", marginBottom: "12px" }}>📊</div>
-                <h3 style={{ margin: "0 0 8px 0", color: cores.texto, fontSize: "18px" }}>Relatórios & Caixa</h3>
-                <p style={{ fontSize: "13px", color: cores.textoSecundario, margin: 0 }}>Fechamento e histórico de vendas</p>
-              </div>
-
-              <div 
-                onClick={() => setAbaAtiva("config")}
-                style={{ background: "transparent", padding: "35px 20px", borderRadius: "12px", cursor: "pointer", border: `2px solid #a55eea`, transition: "0.2s" }}
-              >
-                <div style={{ fontSize: "40px", marginBottom: "12px" }}>⚙️</div>
-                <h3 style={{ margin: "0 0 8px 0", color: cores.texto, fontSize: "18px" }}>Configurações</h3>
-                <p style={{ fontSize: "13px", color: cores.textoSecundario, margin: 0 }}>Logo, cupom e dados da loja</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 2. PÁGINAS RENDERIZADAS */}
-        {abaAtiva === "pdv" && (
-          <Pdv
-            produtos={produtos}
-            caixaAberto={caixaAberto}
-            usuarioLogado={usuarioLogado}
-            cores={cores}
-            tema={tema}
-            recarregarDados={carregarDados}
-            setDadosRecibo={(recibo) => {
-              setDadosFechamentoPdf(null);
-              setDadosRelatorioProdutosPdf(false);
-              setDadosRecibo(recibo);
-            }}
-          />
-        )}
-
-        {abaAtiva === "estoque" && (
-          <Estoque
-            produtos={produtos}
-            cores={cores}
-            recarregarDados={carregarDados}
-            emitirRelatorioProdutos={emitirRelatorioProdutos}
-            usuarioLogado={usuarioLogado}
-          />
-        )}
-
-        {abaAtiva === "historico" && (
-          <Relatorio
-            vendas={vendas}
-            produtos={produtos}
-            caixaAberto={caixaAberto}
-            setCaixaAberto={setCaixaAberto}
-            usuarioLogado={usuarioLogado}
-            cores={cores}
-            ultimoFechamentoSalvo={ultimoFechamentoSalvo}
-            setUltimoFechamentoSalvo={setUltimoFechamentoSalvo}
-            totalHistoricoConsolidado={totalHistoricoConsolidado}
-            setTotalHistoricoConsolidado={setTotalHistoricoConsolidado}
-            recarregarDados={carregarDados}
-            setDadosRecibo={setDadosRecibo}
-            setDadosFechamentoPdf={(dados) => {
-              setDadosRecibo(null);
-              setDadosRelatorioProdutosPdf(false);
-              setDadosFechamentoPdf(dados);
-            }}
-          />
-        )}
-
-        {abaAtiva === "config" && (
-          <Configuracoes
-            usuarioLogado={usuarioLogado}
-            cores={cores}
-            recarregarConfigLoja={carregarDados}
-          />
-        )}
-
-      </div>
+      {/* RENDERIZAÇÃO DA HOME PRINCIPAL */}
+      <HomePrincipal
+        usuarioLogado={usuarioLogado}
+        cores={cores}
+        tema={tema}
+        alternarTema={alternarTema}
+        handleLogout={handleLogout}
+        produtos={produtos}
+        vendas={vendas}
+        caixaAberto={caixaAberto}
+        setCaixaAberto={setCaixaAberto}
+        ultimoFechamentoSalvo={ultimoFechamentoSalvo}
+        setUltimoFechamentoSalvo={setUltimoFechamentoSalvo}
+        totalHistoricoConsolidado={totalHistoricoConsolidado}
+        setTotalHistoricoConsolidado={setTotalHistoricoConsolidado}
+        carregarDados={carregarDados}
+        setDadosRecibo={setDadosRecibo}
+        setDadosFechamentoPdf={setDadosFechamentoPdf}
+        emitirRelatorioProdutos={emitirRelatorioProdutos}
+      />
     </>
   );
 }

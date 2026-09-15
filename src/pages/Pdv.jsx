@@ -22,6 +22,8 @@ const FORMAS_PAGAMENTO = [
   "Dinheiro"
 ];
 
+const EMAILS_COMPARTILHADOS = ["jarbasantonio201@gmail.com", "lucasesilva438@gmail.com"];
+
 export default function Pdv({ 
   produtos, 
   caixaAberto, 
@@ -79,6 +81,9 @@ export default function Pdv({
   const inputDinheiroRef = useRef(null);
 
   const listaBuscaRef = useRef(null);
+
+  const isCompartilhado = usuarioLogado?.email && EMAILS_COMPARTILHADOS.includes(usuarioLogado.email);
+  const lojaIdAtual = isCompartilhado ? "compartilhado_jarbas_lucas" : (usuarioLogado?.uid || "loja_padrao");
 
   // Cores dinâmicas por modo de venda
   const corModo = 
@@ -444,7 +449,7 @@ export default function Pdv({
           caixaId: caixaAberto ? caixaAberto.id : "sem_caixa",
           tipoVenda: "a_ver",
           operadorEmail: usuarioLogado?.email || "operador",
-          lojaId: usuarioLogado?.uid || "loja_padrao",
+          lojaId: lojaIdAtual,
           itens: carrinho.map((item) => ({
             id: item.id,
             nome: item.nome,
@@ -462,7 +467,7 @@ export default function Pdv({
 
         const pedidoRef = doc(collection(db, "pedidos"));
         transaction.set(pedidoRef, {
-          lojaId: usuarioLogado?.uid || "loja_padrao",
+          lojaId: lojaIdAtual,
           cliente: nomeResponsavelAVer.trim(),
           tipo: "mercadoria_a_ver",
           status: "pendente_prova",
@@ -530,7 +535,7 @@ export default function Pdv({
           caixaId: caixaAberto ? caixaAberto.id : "sem_caixa",
           tipoVenda: tipoTabela,
           operadorEmail: usuarioLogado?.email || "operador",
-          lojaId: usuarioLogado?.uid || "loja_padrao",
+          lojaId: lojaIdAtual,
           itens: carrinho.map((item) => ({
             id: item.id,
             nome: item.nome,
