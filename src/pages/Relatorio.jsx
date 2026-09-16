@@ -33,6 +33,9 @@ export default function Relatorio({
   const [salvandoEdicao, setSalvandoEdicao] = useState(false);
   const [processandoLimpeza, setProcessandoLimpeza] = useState(false);
 
+  // Estado local para gerenciar a impressão isolada do cupom a partir do relatório
+  const [vendaReimprimirLocal, setVendaReimprimirLocal] = useState(null);
+
   const inputStyle = {
     width: "100%",
     padding: "10px",
@@ -56,6 +59,8 @@ export default function Relatorio({
   let totalCartao = 0;
 
   vendasDoCaixaAtual.forEach(v => {
+    // Se for mercadoria a ver de Jarbas ou Lucas com flag de não computar no caixa, ignora da soma
+    if (v.naoComputarNoCaixa) return;
     const valor = Number(v.total || 0);
     const pg = (v.formaPagamento || "").toLowerCase();
     if (pg.includes("dinheiro")) totalDinheiro += valor;
@@ -115,24 +120,11 @@ export default function Relatorio({
   }
 
   function reimprimirCupom(venda) {
-    if (setDadosRecibo) {
-      const dataHoraStr = venda.data?.toDate ? venda.data.toDate().toLocaleString("pt-BR") : new Date().toLocaleString("pt-BR");
-      setDadosRecibo({
-        id: venda.id.slice(-6).toUpperCase(),
-        dataHora: dataHoraStr,
-        itens: venda.itens || [],
-        subtotalBruto: venda.subtotalBruto || venda.total,
-        desconto: venda.desconto || 0,
-        total: venda.total,
-        formaPagamento: venda.formaPagamento,
-        tipoVenda: venda.tipoVenda || "varejo",
-        infoParcelas: venda.parcelas || null,
-        infoDinheiro: venda.dadosDinheiro || null
-      });
-      setTimeout(() => {
-        window.print();
-      }, 300);
-    }
+    setVendaReimprimirLocal(venda);
+    setTimeout(() => {
+      window.print();
+      setTimeout(() => setVendaReimprimirLocal(null), 500);
+    }, 300);
   }
 
   async function handleAbrirCaixa(e) {
@@ -172,7 +164,7 @@ export default function Relatorio({
     const dataHoje = caixaAberto?.dataString || agora.toLocaleDateString("pt-BR");
     const horaFechamento = agora.toLocaleTimeString("pt-BR");
 
-    document.title = `vendas ${dataHoje.replace(/\//g, '-')}`;
+    document.title = `fechamento_caixa_${dataHoje.replace(/\//g, '-')}`;
 
     setDadosFechamentoPdf({
       dataHoje,
@@ -245,6 +237,78 @@ export default function Relatorio({
 
   return (
     <div style={{ width: "100%", boxSizing: "border-box" }}>
+      <style>{`
+        @media print {
+          body * { visibility: hidden !important; }
+          .print-recibo-local, .print-recibo-local * { visibility: visible !important; }
+          .print-recibo-local { 
+            display: block !important; 
+            position: absolute; 
+            left: 0; 
+            top: 0; 
+            width: 80mm !important; 
+            background: #fff !important; 
+            color: #000 !important; 
+            font-family: 'Courier New', Courier, monospace !important; 
+            font-size: 11px !important;
+            padding: 4mm !important;
+          }
+        }
+        @media screen {
+          .print-recibo-local { display: none; }
+        }
+      `}</style>
+
+      {/* MOLDE DE REIMPRESSÃO DE CUPOM ISOLADO */}
+      {vendaReimprimirLocal && (
+        <div className="print-recibo-local">
+          <div style={{ textAlign: "center", marginBottom: "8px" }}>
+            <h2 style={{ margin: 0, fontSize: "14px", fontWeight: "bold" }}>LIFE SURF</h2>
+            <p style={{ margin: "2px 0", fontSize: "10px" }}>COMPROVANTE DE VENDA (REIMPRESSÃO)</p>
+            <p style={{ margin: "2px 0", fontSize: "9px" }}>Pedido: #{vendaReimprimirLocal.id.slice(-6).toUpperCase()}</p>
+            <p style={{ margin: "2px 0", fontSize: "9px" }}>{vendaReimprimirLocal.data?.toDate ? vendaReimprimirLocal.data.toDate().toLocaleString("pt-BR") : new Date().toLocaleString("pt-BR")}</p>
+          </div>
+          <div style={{ borderBottom: "1px dashed #000", margin: "6px 0" }}></div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "10px" }}>
+            <span>ITEM / TAM / QTD x VL.UN</span>
+            <span>TOTAL</span>
+          </div>
+          <div style={{ borderBottom: "1px dashed #000", margin: "4px 0 6px 0" }}></div>
+          {vendaReimprimirLocal.itens?.map((item, i) => (
+            <div key={i} style={{ marginBottom: "6px", fontSize: "10px" }}>
+              <div>{item.nome} {item.tamanhoSelecionado ? `[Tam: ${item.tamanhoSelecionado}]` : ""}</div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>{item.quantidade}x R$ {Number(item.precoUnitario).toFixed(2)}</span>
+                <span>R$ {(item.quantidade * item.precoUnitario).toFixed(2)}</span>
+              </div>
+            </div>
+          ))}
+          {vendaReimprimirLocal.infoTroca?.itemTrocado && (
+            <div style={{ fontSize: "9px", marginTop: "4px", borderTop: "1px dotted #000", paddingTop: "4px" }}>
+              <strong>Obs:</strong> {vendaReimprimirLocal.infoTroca.itemTrocado}
+            </div>
+          )}
+          <div style={{ borderBottom: "1px dashed #000", margin: "6px 0" }}></div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px" }}>
+            <span>Subtotal:</span>
+            <span>R$ {Number(vendaReimprimirLocal.subtotalBruto || vendaReimprimirLocal.total).toFixed(2)}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "12px", marginTop: "4px" }}>
+            <span>TOTAL PAGO:</span>
+            <span>R$ {Number(vendaReimprimirLocal.total || 0).toFixed(2)}</span>
+          </div>
+          <div style={{ borderBottom: "1px dashed #000", margin: "6px 0" }}></div>
+          <div style={{ textAlign: "center", fontSize: "10px" }}>
+            <p style={{ margin: "2px 0" }}>Forma: {vendaReimprimirLocal.formaPagamento}</p>
+            <p style={{ margin: "2px 0" }}>Modo: {(vendaReimprimirLocal.tipoVenda || "varejo").toUpperCase()}</p>
+          </div>
+          <div style={{ borderBottom: "1px dashed #000", margin: "6px 0" }}></div>
+          <div style={{ textAlign: "center", fontSize: "9px", marginTop: "8px" }}>
+            OBRIGADO PELA PREFERÊNCIA! VOLTE SEMPRE!
+          </div>
+        </div>
+      )}
+
       <h2 style={{ color: cores.texto, marginTop: 0 }}>📊 Relatórios & Fechamento de Caixa</h2>
 
       <div style={{ marginBottom: "40px" }}>
@@ -324,7 +388,9 @@ export default function Relatorio({
                         <td style={{ padding: "10px" }}>{(v.tipoVenda || "varejo").toUpperCase()}</td>
                         <td style={{ padding: "10px" }}>
                           {v.itens?.map((it, idx) => (
-                            <span key={idx} style={{ display: "block", fontSize: "12px" }}>{it.quantidade}x {it.nome}</span>
+                            <span key={idx} style={{ display: "block", fontSize: "12px" }}>
+                              {it.quantidade}x {it.nome} {it.tamanhoSelecionado ? `[Tam: ${it.tamanhoSelecionado}]` : ""}
+                            </span>
                           ))}
                           {v.infoTroca?.itemTrocado && (
                             <div style={{ marginTop: "4px", fontSize: "11px", color: v.tipoVenda === "a_ver" ? "#8e44ad" : "#ff9f43", fontWeight: "bold" }}>
@@ -335,6 +401,7 @@ export default function Relatorio({
                         <td style={{ padding: "10px" }}>{v.formaPagamento}</td>
                         <td style={{ padding: "10px", fontWeight: "bold", color: Number(v.total || 0) === 0 ? "#8e44ad" : cores.texto }}>
                           R$ {Number(v.total || 0).toFixed(2)}
+                          {v.naoComputarNoCaixa && <span style={{ display: "block", fontSize: "10px", color: "#8e44ad" }}>(Isolado do Caixa)</span>}
                         </td>
                         <td style={{ padding: "10px", textAlign: "center" }}>
                           <div style={{ display: "flex", justifyContent: "center", gap: "6px", flexWrap: "wrap" }}>
@@ -470,7 +537,7 @@ export default function Relatorio({
               <h4 style={{ color: cores.texto, fontSize: "14px", marginBottom: "8px" }}>Itens Vendidos</h4>
               {novosItens.map((it, idx) => (
                 <div key={idx} style={{ display: "flex", gap: "10px", marginBottom: "8px", alignItems: "center" }}>
-                  <span style={{ color: cores.texto, flex: 2, fontSize: "13px" }}>{it.nome}</span>
+                  <span style={{ color: cores.texto, flex: 2, fontSize: "13px" }}>{it.nome} {it.tamanhoSelecionado ? `[${it.tamanhoSelecionado}]` : ""}</span>
                   <input 
                     type="number" 
                     value={it.quantidade} 
