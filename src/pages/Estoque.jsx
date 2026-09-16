@@ -8,6 +8,8 @@ import {
   deleteDoc, 
   serverTimestamp 
 } from "firebase/firestore";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 const CATEGORIAS_PADRAO = [
   "Camisa",
@@ -22,6 +24,8 @@ const CATEGORIAS_PADRAO = [
 ];
 
 const LISTA_TAMANHOS = ["PP", "P", "M", "G", "GG", "EXG", "G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9", "G10"];
+const LISTA_TAMANHOS_NUMEROS = ["36", "38", "40", "42", "44", "46", "48", "50", "52", "54", "56", "58", "60", "62", "64", "66", "68", "70"];
+
 const EMAILS_COMPARTILHADOS = ["jarbasantonio201@gmail.com", "lucasesilva438@gmail.com"];
 
 function parseTamanhos(str) {
@@ -38,7 +42,6 @@ export default function Estoque({
   produtos, 
   cores, 
   recarregarDados, 
-  emitirRelatorioProdutos,
   usuarioLogado 
 }) {
   const [produtoEditandoId, setProdutoEditandoId] = useState(null);
@@ -55,6 +58,7 @@ export default function Estoque({
   // Estados dos Tamanhos e Modos
   const [modalTamanhosAberto, setModalTamanhosAberto] = useState(false);
   const [modoTamanho, setModoTamanho] = useState("adicionar"); // "adicionar" | "retirar" | "recontar"
+  const [tipoGradeTamanho, setTipoGradeTamanho] = useState("letras"); // "letras" | "numeros"
   const [tamanhosTemp, setTamanhosTemp] = useState({});
   const [tamanhosSalvos, setTamanhosSalvos] = useState("");
 
@@ -69,9 +73,14 @@ export default function Estoque({
   function abrirModalTamanhos() {
     const atualObj = parseTamanhos(tamanhosSalvos);
     const inicial = {};
-    LISTA_TAMANHOS.forEach(t => {
+    
+    [...LISTA_TAMANHOS, ...LISTA_TAMANHOS_NUMEROS].forEach(t => {
       inicial[t] = modoTamanho === "recontar" ? (atualObj[t] !== undefined ? atualObj[t] : "") : "";
     });
+
+    const temNumero = Object.keys(atualObj).some(k => LISTA_TAMANHOS_NUMEROS.includes(k));
+    setTipoGradeTamanho(temNumero ? "numeros" : "letras");
+
     setTamanhosTemp(inicial);
     setModalTamanhosAberto(true);
   }
@@ -129,7 +138,6 @@ export default function Estoque({
       setEstoque(estoqueAtualNum > 0 ? estoqueAtualNum.toString() : "");
 
     } else if (modoTamanho === "recontar") {
-      // Recalcula o estoque total automaticamente somando os tamanhos informados na contagem
       let somaTotalRecontada = 0;
       const descricoes = [];
       Object.keys(tamanhosTemp).forEach(t => {
@@ -148,6 +156,7 @@ export default function Estoque({
 
   async function handleSalvarProduto(e) {
     e.preventDefault();
+    if (salvandoProduto) return;
     if (!nome.trim() || !precoVarejo || estoque === "") {
       alert("Preencha Nome, Preço Varejo e o Estoque.");
       return;
@@ -226,6 +235,7 @@ export default function Estoque({
     setTamanhosSalvos("");
     setTamanhosTemp({});
     setPermiteNegativo(false);
+    setTipoGradeTamanho("letras");
   }
 
   async function handleExcluirProduto(id, nomeProd) {
@@ -236,6 +246,153 @@ export default function Estoque({
     } catch (err) {
       alert("Erro ao excluir: " + err.message);
     }
+  }
+
+  function emitirRelatorioProdutosLocal() {
+    if (produtosProcessados.length === 0) {
+      alert("Não há produtos para exportar com os filtros atuais.");
+      return;
+    }
+
+    const hoje = new Date();
+    const dia = String(hoje.getDate()).padStart(2, '0');
+    const mes = String(hoje.getMonth() + 1).padStart(2, '0');
+    const ano = hoje.getFullYear();
+    const dataEmissaoStr = `${dia}/${mes}/${ano} ${String(hoje.getHours()).padStart(2, '0')}:${String(hoje.getMinutes()).padStart(2, '0')}`;
+    const perfilStr = usuarioLogado?.email ? `@${usuarioLogado.email.split('@')[0]}` : "@sistema";
+
+    const doc = new jsPDF("portrait", "mm", "a4");
+
+    // Cabeçalho Corporativo Monocromático
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.setTextColor(30, 30, 30);
+    doc.text("INVENTÁRIO DE ESTOQUE", 14, 20);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9.5);
+    doc.setTextColor(100, 100, 100);
+    doc.text("Relatório de produtos e disponibilidade em estoque", 14, 26);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(50, 50, 50);
+    doc.text(`Data de emissão: ${dataEmissaoStr}`, 196, 20, { align: "right" });
+    doc.text(`Responsável: ${perfilStr}`, 196, 26, { align: "right" });
+
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.4);
+    doc.line(14, 32, 196, 32);
+
+    // Resumo / KPIs calculados a partir de produtosProcessados
+    const totalProdutos = produtosProcessados.length;
+    const totalPecas = produtosProcessados.reduce((acc, p) => acc + (Number(p.estoque) || 0), 0);
+    const semEstoque = produtosProcessados.filter(p => (Number(p.estoque) || 0) <= 0).length;
+    const categoriasUnicas = new Set(produtosProcessados.map(p => p.categoria || "Outros")).size;
+
+    // Caixa de Resumo Executivo (Monocromática)
+    doc.setFillColor(245, 245, 245);
+    doc.setDrawColor(210, 210, 210);
+    doc.roundedRect(14, 37, 182, 18, 1, 1, "FD");
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 100, 100);
+    doc.text("PRODUTOS LISTADOS", 18, 43);
+    doc.text("TOTAL DE PEÇAS", 65, 43);
+    doc.text("SEM ESTOQUE", 115, 43);
+    doc.text("CATEGORIAS", 160, 43);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(30, 30, 30);
+    doc.text(String(totalProdutos), 18, 50);
+    doc.text(`${totalPecas} un`, 65, 50);
+    doc.text(String(semEstoque), 115, 50);
+    doc.text(String(categoriasUnicas), 160, 50);
+
+    // Tabela de Dados
+    const tableColumn = ["Nome", "Categoria", "Ref", "Tamanhos / Prateleira", "Varejo", "Atacado", "Estoque"];
+    const tableRows = produtosProcessados.map(p => [
+      p.nome || "—",
+      p.categoria || "—",
+      p.referencia || "—",
+      p.tamanhos || "—",
+      `R$ ${Number(p.precoVarejo || p.preco || 0).toFixed(2)}`,
+      `R$ ${Number(p.precoAtacado || p.precoVarejo || p.preco || 0).toFixed(2)}`,
+      `${p.estoque ?? 0} un`
+    ]);
+
+    autoTable(doc, {
+      startY: 60,
+      head: [tableColumn],
+      body: tableRows,
+      theme: "grid",
+      styles: {
+        font: "helvetica",
+        fontSize: 8,
+        cellPadding: 4,
+        textColor: [40, 40, 40],
+        lineColor: [210, 210, 210],
+        lineWidth: 0.1
+      },
+      headStyles: {
+        fillColor: [60, 60, 60],
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+        halign: "left"
+      },
+      alternateRowStyles: {
+        fillColor: [250, 250, 250]
+      },
+      columnStyles: {
+        0: { cellWidth: 42 },
+        1: { cellWidth: 26 },
+        2: { cellWidth: 20 },
+        3: { cellWidth: 38 },
+        4: { cellWidth: 20, halign: "right" },
+        5: { cellWidth: 20, halign: "right" },
+        6: { cellWidth: 16, halign: "center" }
+      },
+      didDrawPage: (data) => {
+        const pageCount = doc.internal.getNumberOfPages();
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(100, 100, 100);
+        
+        const footerText = `Inventário de Estoque  |  Responsável: ${perfilStr}  |  Página ${data.pageNumber} de ${pageCount}`;
+        doc.text(footerText, 14, 290);
+
+        doc.setDrawColor(210, 210, 210);
+        doc.setLineWidth(0.4);
+        doc.line(14, 286, 196, 286);
+      },
+      margin: { top: 60, right: 14, bottom: 20, left: 14 }
+    });
+
+    // Área de Assinatura Profissional
+    let finalY = doc.lastAutoTable.finalY + 15;
+    if (finalY > 245) {
+      doc.addPage();
+      finalY = 30;
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.setTextColor(50, 50, 50);
+    doc.text("Assinatura do Responsável", 14, finalY);
+
+    doc.setDrawColor(120, 120, 120);
+    doc.setLineWidth(0.5);
+    doc.line(14, finalY + 22, 110, finalY + 22);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(80, 80, 80);
+    doc.text("Nome / Assinatura", 14, finalY + 27);
+    doc.text(`Responsável: ${perfilStr}`, 14, finalY + 32);
+
+    doc.save(`inventario-produtos-${dia}-${mes}-${ano}.pdf`);
   }
 
   const produtosProcessados = useMemo(() => {
@@ -265,7 +422,7 @@ export default function Estoque({
   const inputStyle = {
     width: "100%",
     padding: "11px",
-    background: "transparent",
+    background: cores.inputBg || cores.bgCard || "transparent",
     border: `1px solid ${cores.borda}`,
     color: cores.texto,
     borderRadius: "8px",
@@ -289,15 +446,15 @@ export default function Estoque({
         <h2 style={{ color: cores.texto, margin: 0, fontSize: "20px" }}>{produtoEditandoId ? "✏️ Editar Produto / Ajustar Tamanhos" : "Novo Cadastro de Produto na Loja"}</h2>
         <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
           <button
-            onClick={emitirRelatorioProdutos}
+            onClick={emitirRelatorioProdutosLocal}
             style={{ background: "#28a745", color: "#fff", border: "none", padding: "9px 16px", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", fontSize: "13px" }}
           >
-            📋 Inventário de Produtos
+            📋 Inventário de Produtos (PDF)
           </button>
           {produtoEditandoId && (
             <button
               onClick={limparFormularioProduto}
-              style={{ background: cores.bgCardSecundario, color: cores.texto, border: `1px solid ${cores.borda}`, padding: "9px 14px", borderRadius: "8px", cursor: "pointer", fontSize: "13px" }}
+              style={{ background: cores.bgCardSecundario || cores.bgCard, color: cores.texto, border: `1px solid ${cores.borda}`, padding: "9px 14px", borderRadius: "8px", cursor: "pointer", fontSize: "13px" }}
             >
               ✕ Cancelar Edição
             </button>
@@ -338,7 +495,7 @@ export default function Estoque({
           <label style={{ display: "block", fontSize: "12px", marginBottom: "5px", color: cores.textoSecundario }}>Categoria</label>
           <select value={categoria} onChange={(e) => setCategoria(e.target.value)} style={inputStyle} className="input-animado">
             {CATEGORIAS_PADRAO.map(c => (
-              <option key={c} value={c} style={{ background: cores.bgGeral, color: cores.texto }}>{c}</option>
+              <option key={c} value={c} style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>{c}</option>
             ))}
           </select>
         </div>
@@ -364,7 +521,7 @@ export default function Estoque({
         </div>
 
         <div style={{ display: "flex", alignItems: "flex-end" }}>
-          <button type="submit" disabled={salvandoProduto} style={{ width: "100%", padding: "12px", background: produtoEditandoId ? "#007bff" : "#28a745", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", fontSize: "14px" }}>
+          <button type="submit" disabled={salvandoProduto} style={{ width: "100%", padding: "12px", background: produtoEditandoId ? "#007bff" : "#28a745", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", fontSize: "14px", opacity: salvandoProduto ? 0.7 : 1 }}>
             {salvandoProduto ? "Gravando..." : produtoEditandoId ? "Atualizar Produto" : "+ Salvar Produto"}
           </button>
         </div>
@@ -379,28 +536,28 @@ export default function Estoque({
       {/* MODAL DE GERENCIAR TAMANHOS */}
       {modalTamanhosAberto && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1200, padding: "15px", boxSizing: "border-box" }}>
-          <div style={{ background: cores.bgGeral, border: `1px solid ${cores.borda}`, padding: "20px", borderRadius: "12px", width: "100%", maxWidth: "480px", maxHeight: "90vh", overflowY: "auto", boxSizing: "border-box" }}>
-            <h3 style={{ marginTop: 0, marginBottom: "15px", textAlign: "center", fontSize: "16px" }}>👕 Gerenciar Tamanhos e Estoque</h3>
+          <div style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto, border: `1px solid ${cores.borda}`, padding: "20px", borderRadius: "12px", width: "100%", maxWidth: "480px", maxHeight: "90vh", overflowY: "auto", boxSizing: "border-box" }}>
+            <h3 style={{ marginTop: 0, marginBottom: "15px", textAlign: "center", fontSize: "16px", color: cores.texto }}>👕 Gerenciar Tamanhos e Estoque</h3>
             
             <div style={{ display: "flex", gap: "6px", marginBottom: "15px" }}>
               <button
                 type="button"
                 onClick={() => setModoTamanho("adicionar")}
-                style={{ flex: 1, padding: "8px", background: modoTamanho === "adicionar" ? "#28a745" : cores.bgCardSecundario, color: modoTamanho === "adicionar" ? "#fff" : cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "11px" }}
+                style={{ flex: 1, padding: "8px", background: modoTamanho === "adicionar" ? "#28a745" : (cores.bgCardSecundario || cores.bgCard), color: modoTamanho === "adicionar" ? "#fff" : cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "11px" }}
               >
                 🟢 Adicionar
               </button>
               <button
                 type="button"
                 onClick={() => setModoTamanho("retirar")}
-                style={{ flex: 1, padding: "8px", background: modoTamanho === "retirar" ? "#e53e3e" : cores.bgCardSecundario, color: modoTamanho === "retirar" ? "#fff" : cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "11px" }}
+                style={{ flex: 1, padding: "8px", background: modoTamanho === "retirar" ? "#e53e3e" : (cores.bgCardSecundario || cores.bgCard), color: modoTamanho === "retirar" ? "#fff" : cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "11px" }}
               >
                 🔴 Retirar
               </button>
               <button
                 type="button"
                 onClick={() => setModoTamanho("recontar")}
-                style={{ flex: 1, padding: "8px", background: modoTamanho === "recontar" ? "#ffc107" : cores.bgCardSecundario, color: modoTamanho === "recontar" ? "#000" : cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "11px" }}
+                style={{ flex: 1, padding: "8px", background: modoTamanho === "recontar" ? "#ffc107" : (cores.bgCardSecundario || cores.bgCard), color: modoTamanho === "recontar" ? "#000" : cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "11px" }}
               >
                 🟡 Ajustar / Atacado
               </button>
@@ -412,14 +569,32 @@ export default function Estoque({
               {modoTamanho === "recontar" && "Reconte a prateleira e atualize os tamanhos (atualiza o estoque total automaticamente)."}
             </p>
 
+            {/* ABAS DE ALTERNÂNCIA DE GRADE (LETRAS VS NÚMEROS) */}
+            <div style={{ display: "flex", width: "100%", marginBottom: "15px" }}>
+              <button 
+                type="button"
+                onClick={() => setTipoGradeTamanho("letras")}
+                style={{ flex: 1, padding: "8px", background: tipoGradeTamanho === "letras" ? "#007bff" : (cores.bgCardSecundario || cores.bgCard), color: tipoGradeTamanho === "letras" ? "#fff" : cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "6px 0 0 6px", cursor: "pointer", fontSize: "11px", fontWeight: "bold" }}
+              >
+                Letras (P, M, G)
+              </button>
+              <button 
+                type="button"
+                onClick={() => setTipoGradeTamanho("numeros")}
+                style={{ flex: 1, padding: "8px", background: tipoGradeTamanho === "numeros" ? "#007bff" : (cores.bgCardSecundario || cores.bgCard), color: tipoGradeTamanho === "numeros" ? "#fff" : cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "0 6px 6px 0", cursor: "pointer", fontSize: "11px", fontWeight: "bold", borderLeft: "none" }}
+              >
+                Números (36 ao 70)
+              </button>
+            </div>
+
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px", marginBottom: "20px" }}>
-              {LISTA_TAMANHOS.map(tam => {
+              {(tipoGradeTamanho === "letras" ? LISTA_TAMANHOS : LISTA_TAMANHOS_NUMEROS).map(tam => {
                 const atualObj = parseTamanhos(tamanhosSalvos);
                 const dispAtual = atualObj[tam] || 0;
                 return (
                   <div key={tam} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: cores.bgCard, padding: "6px 10px", borderRadius: "6px", border: `1px solid ${cores.borda}` }}>
                     <div>
-                      <span style={{ fontWeight: "bold", fontSize: "13px" }}>{tam}</span>
+                      <span style={{ fontWeight: "bold", fontSize: "13px", color: cores.texto }}>{tam}</span>
                       <span style={{ fontSize: "10px", color: cores.textoSecundario, display: "block" }}>Atual: {dispAtual}</span>
                     </div>
                     <input 
@@ -435,7 +610,7 @@ export default function Estoque({
                           [tam]: val === "" ? "" : parseInt(val, 10) 
                         }));
                       }}
-                      style={{ width: "55px", padding: "5px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "4px", textAlign: "center", fontWeight: "bold", fontSize: "13px", outline: "none" }}
+                      style={{ width: "55px", padding: "5px", background: cores.inputBg || cores.bgCard, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "4px", textAlign: "center", fontWeight: "bold", fontSize: "13px", outline: "none" }}
                     />
                   </div>
                 );
@@ -480,9 +655,9 @@ export default function Estoque({
               style={inputStyle}
               className="input-animado"
             >
-              <option value="TODAS" style={{ background: cores.bgGeral, color: cores.texto }}>Todas as Categorias</option>
+              <option value="TODAS" style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>Todas as Categorias</option>
               {CATEGORIAS_PADRAO.map((c) => (
-                <option key={c} value={c} style={{ background: cores.bgGeral, color: cores.texto }}>{c}</option>
+                <option key={c} value={c} style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>{c}</option>
               ))}
             </select>
           </div>
@@ -495,12 +670,12 @@ export default function Estoque({
               style={inputStyle}
               className="input-animado"
             >
-              <option value="nome_asc" style={{ background: cores.bgGeral, color: cores.texto }}>Nome (A → Z)</option>
-              <option value="nome_desc" style={{ background: cores.bgGeral, color: cores.texto }}>Nome (Z → A)</option>
-              <option value="estoque_desc" style={{ background: cores.bgGeral, color: cores.texto }}>Maior Estoque</option>
-              <option value="estoque_asc" style={{ background: cores.bgGeral, color: cores.texto }}>Menor Estoque</option>
-              <option value="preco_desc" style={{ background: cores.bgGeral, color: cores.texto }}>Maior Preço Varejo</option>
-              <option value="preco_asc" style={{ background: cores.bgGeral, color: cores.texto }}>Menor Preço Varejo</option>
+              <option value="nome_asc" style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>Nome (A → Z)</option>
+              <option value="nome_desc" style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>Nome (Z → A)</option>
+              <option value="estoque_desc" style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>Maior Estoque</option>
+              <option value="estoque_asc" style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>Menor Estoque</option>
+              <option value="preco_desc" style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>Maior Preço Varejo</option>
+              <option value="preco_asc" style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>Menor Preço Varejo</option>
             </select>
           </div>
         </div>
@@ -546,7 +721,7 @@ export default function Estoque({
                   </td>
                   <td style={{ padding: "12px", textAlign: "center" }}>
                     <div style={{ display: "flex", justifyContent: "center", gap: "6px" }}>
-                      <button onClick={() => carregarParaEdicao(p)} style={{ background: "#007bff", color: "#fff", border: "none", borderRadius: "6px", padding: "6px 12px", cursor: "pointer", fontSize: "12px" }}>Editar / Recorrer</button>
+                      <button onClick={() => carregarParaEdicao(p)} style={{ background: "#007bff", color: "#fff", border: "none", borderRadius: "6px", padding: "6px 12px", cursor: "pointer", fontSize: "12px" }}>Editar / Ajustar</button>
                       <button onClick={() => handleExcluirProduto(p.id, p.nome)} style={{ background: "#e53e3e", color: "#fff", border: "none", borderRadius: "6px", padding: "6px 12px", cursor: "pointer", fontSize: "12px" }}>Excluir</button>
                     </div>
                   </td>

@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { db } from "../firebase";
 import { doc, updateDoc, deleteDoc, setDoc, collection } from "firebase/firestore";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 const EMAILS_COMPARTILHADOS = ["jarbasantonio201@gmail.com", "lucasesilva438@gmail.com"];
 
@@ -15,8 +17,8 @@ export default function Relatorio({
   totalHistoricoConsolidado,
   setTotalHistoricoConsolidado,
   recarregarDados,
-  setDadosFechamentoPdf,
-  setDadosRecibo
+  setDadosRecibo,
+  setDadosFechamentoPdf
 }) {
   const isCompartilhado = usuarioLogado?.email && EMAILS_COMPARTILHADOS.includes(usuarioLogado.email);
   const lojaId = isCompartilhado ? "compartilhado_jarbas_lucas" : (usuarioLogado?.uid || "loja_padrao");
@@ -29,19 +31,24 @@ export default function Relatorio({
   const [modalAbertura, setModalAbertura] = useState(false);
   const [trocoInicialInput, setTrocoInicialInput] = useState("0.00");
   const [abrindoCaixa, setAbrindoCaixa] = useState(false);
+  const [fechandoCaixa, setFechandoCaixa] = useState(false);
 
   const [salvandoEdicao, setSalvandoEdicao] = useState(false);
   const [processandoLimpeza, setProcessandoLimpeza] = useState(false);
 
+  // Estado local para a reimpressão térmica isolada
+  const [vendaReimprimirLocal, setVendaReimprimirLocal] = useState(null);
+
   const inputStyle = {
     width: "100%",
     padding: "10px",
-    background: "transparent",
+    background: cores.inputBg || cores.bgCard || "transparent",
     border: `1px solid ${cores.borda}`,
     color: cores.texto,
     borderRadius: "6px",
     boxSizing: "border-box",
-    fontSize: "13px"
+    fontSize: "13px",
+    outline: "none"
   };
 
   const vendasDoCaixaAtual = vendas.filter((v) => {
@@ -58,9 +65,13 @@ export default function Relatorio({
   vendasDoCaixaAtual.forEach(v => {
     const valor = Number(v.total || 0);
     const pg = (v.formaPagamento || "").toLowerCase();
-    if (pg.includes("dinheiro")) totalDinheiro += valor;
-    else if (pg.includes("pix")) totalPix += valor;
-    else if (pg.includes("cartão") || pg.includes("cartao") || pg.includes("débito") || pg.includes("crédito")) totalCartao += valor;
+    if (pg.includes("dinheiro")) {
+      totalDinheiro += valor;
+    } else if (pg.includes("pix")) {
+      totalPix += valor;
+    } else if (pg.includes("cartão") || pg.includes("cartao") || pg.includes("débito") || pg.includes("crédito")) {
+      totalCartao += valor;
+    }
   });
 
   const somaTotalCaixa = totalDinheiro + totalPix + totalCartao;
@@ -115,28 +126,18 @@ export default function Relatorio({
   }
 
   function reimprimirCupom(venda) {
-    if (setDadosRecibo) {
-      const dataHoraStr = venda.data?.toDate ? venda.data.toDate().toLocaleString("pt-BR") : new Date().toLocaleString("pt-BR");
-      setDadosRecibo({
-        id: venda.id.slice(-6).toUpperCase(),
-        dataHora: dataHoraStr,
-        itens: venda.itens || [],
-        subtotalBruto: venda.subtotalBruto || venda.total,
-        desconto: venda.desconto || 0,
-        total: venda.total,
-        formaPagamento: venda.formaPagamento,
-        tipoVenda: venda.tipoVenda || "varejo",
-        infoParcelas: venda.parcelas || null,
-        infoDinheiro: venda.dadosDinheiro || null
-      });
+    setVendaReimprimirLocal(venda);
+    requestAnimationFrame(() => {
       setTimeout(() => {
         window.print();
-      }, 300);
-    }
+        setTimeout(() => setVendaReimprimirLocal(null), 300);
+      }, 100);
+    });
   }
 
   async function handleAbrirCaixa(e) {
     e.preventDefault();
+    if (abrindoCaixa) return;
     setAbrindoCaixa(true);
     try {
       const dataHojeStr = new Date().toLocaleDateString("pt-BR");
@@ -167,32 +168,137 @@ export default function Relatorio({
       alert("Não há caixa aberto no momento!");
       return;
     }
-
-    const agora = new Date();
-    const dataHoje = caixaAberto?.dataString || agora.toLocaleDateString("pt-BR");
-    const horaFechamento = agora.toLocaleTimeString("pt-BR");
-
-    document.title = `vendas ${dataHoje.replace(/\//g, '-')}`;
-
-    setDadosFechamentoPdf({
-      dataHoje,
-      horaFechamento,
-      trocoInicial: caixaAberto?.trocoInicial || 0,
-      qtdVendas: vendasDoCaixaAtual.length,
-      dinheiroHoje: totalDinheiro,
-      pixHoje: totalPix,
-      debitoHoje: totalCartao,
-      creditoHoje: 0,
-      totalVendido: somaTotalCaixa,
-      vendas: vendasDoCaixaAtual
-    });
+    if (fechandoCaixa) return;
+    setFechandoCaixa(true);
 
     try {
+      const agora = new Date();
+      const dataHoje = caixaAberto?.dataString || agora.toLocaleDateString("pt-BR");
+      const horaFechamento = agora.toLocaleTimeString("pt-BR");
+      const perfilStr = usuarioLogado?.email ? `@${usuarioLogado.email.split('@')[0]}` : "@sistema";
+
+      // 1. Geração direta do PDF Corporativo Monocromático com jsPDF
+      const docPdf = new jsPDF("portrait", "mm", "a4");
+
+      docPdf.setFont("helvetica", "bold");
+      docPdf.setFontSize(16);
+      docPdf.setTextColor(30, 30, 30);
+      docPdf.text("FECHAMENTO DE CAIXA", 14, 20);
+
+      docPdf.setFont("helvetica", "normal");
+      docPdf.setFontSize(9.5);
+      docPdf.setTextColor(100, 100, 100);
+      docPdf.text(`Data do Caixa: ${dataHoje} | Horário de Fechamento: ${horaFechamento}`, 14, 26);
+
+      docPdf.setFont("helvetica", "bold");
+      docPdf.setFontSize(9);
+      docPdf.setTextColor(50, 50, 50);
+      docPdf.text(`Responsável: ${perfilStr}`, 196, 20, { align: "right" });
+
+      docPdf.setDrawColor(200, 200, 200);
+      docPdf.setLineWidth(0.4);
+      docPdf.line(14, 32, 196, 32);
+
+      const trocoIni = Number(caixaAberto?.trocoInicial || 0);
+      const qtdV = vendasDoCaixaAtual.length;
+      const somaTotal = somaTotalCaixa;
+
+      // Caixa de Resumo Financeiro
+      docPdf.setFillColor(245, 245, 245);
+      docPdf.setDrawColor(210, 210, 210);
+      docPdf.roundedRect(14, 37, 182, 22, 1, 1, "FD");
+
+      docPdf.setFont("helvetica", "bold");
+      docPdf.setFontSize(7.5);
+      docPdf.setTextColor(100, 100, 100);
+      docPdf.text("FUNDO INICIAL", 18, 43);
+      docPdf.text("DINHEIRO", 55, 43);
+      docPdf.text("PIX", 92, 43);
+      docPdf.text("CARTÃO", 128, 43);
+      docPdf.text("TOTAL VENDIDO", 164, 43);
+
+      docPdf.setFont("helvetica", "bold");
+      docPdf.setFontSize(10);
+      docPdf.setTextColor(30, 30, 30);
+      docPdf.text(`R$ ${trocoIni.toFixed(2)}`, 18, 51);
+      docPdf.text(`R$ ${totalDinheiro.toFixed(2)}`, 55, 51);
+      docPdf.text(`R$ ${totalPix.toFixed(2)}`, 92, 51);
+      docPdf.text(`R$ ${totalCartao.toFixed(2)}`, 128, 51);
+      docPdf.text(`R$ ${somaTotal.toFixed(2)}`, 164, 51);
+
+      // Tabela de Movimentações
+      const tableColumn = ["Hora", "Modo", "Itens / Observações", "Forma de Pagamento", "Total"];
+      const tableRows = vendasDoCaixaAtual.map(v => {
+        const horaVenda = v.data?.toDate ? v.data.toDate().toLocaleTimeString("pt-BR") : "—";
+        const modoVenda = (v.tipoVenda || "varejo").toUpperCase();
+        let itensStr = (v.itens || []).map(it => `${it.quantidade}x ${it.nome}`).join(", ");
+        if (v.infoTroca?.itemTrocado) {
+          if (v.tipoVenda === "a_ver") {
+            itensStr += ` | [A Ver] ${v.infoTroca.itemTrocado}`;
+          } else {
+            itensStr += ` | Troca: ${v.infoTroca.itemTrocado} (Dif: R$ ${Number(v.infoTroca.valorDiferenca || 0).toFixed(2)})`;
+          }
+        }
+        const formaPg = v.formaPagamento || "—";
+        const totalVenda = `R$ ${Number(v.total || 0).toFixed(2)}`;
+
+        return [horaVenda, modoVenda, itensStr, formaPg, totalVenda];
+      });
+
+      autoTable(docPdf, {
+        startY: 64,
+        head: [tableColumn],
+        body: tableRows,
+        theme: "grid",
+        styles: {
+          font: "helvetica",
+          fontSize: 8.5,
+          cellPadding: 4,
+          textColor: [40, 40, 40],
+          lineColor: [210, 210, 210],
+          lineWidth: 0.1
+        },
+        headStyles: {
+          fillColor: [60, 60, 60],
+          textColor: [255, 255, 255],
+          fontStyle: "bold",
+          halign: "left"
+        },
+        alternateRowStyles: {
+          fillColor: [250, 250, 250]
+        },
+        columnStyles: {
+          0: { cellWidth: 20 },
+          1: { cellWidth: 22 },
+          2: { cellWidth: 70 },
+          3: { cellWidth: 40 },
+          4: { cellWidth: 30, halign: "right" }
+        },
+        didDrawPage: (data) => {
+          const pageCount = docPdf.internal.getNumberOfPages();
+          docPdf.setFont("helvetica", "normal");
+          docPdf.setFontSize(8);
+          docPdf.setTextColor(100, 100, 100);
+          
+          const footerText = `Relatório de Fechamento de Caixa  |  Responsável: ${perfilStr}  |  Página ${data.pageNumber} de ${pageCount}`;
+          docPdf.text(footerText, 14, 290);
+
+          docPdf.setDrawColor(210, 210, 210);
+          docPdf.setLineWidth(0.4);
+          docPdf.line(14, 286, 196, 286);
+        },
+        margin: { top: 64, right: 14, bottom: 20, left: 14 }
+      });
+
+      // Salvar PDF de Fechamento
+      docPdf.save(`fechamento-caixa-${dataHoje.replace(/\//g, '-')}.pdf`);
+
+      // 2. Atualizar no Firestore
       const caixaRef = doc(db, "caixas", caixaAberto.id);
       await updateDoc(caixaRef, {
         status: "fechado",
         fechadoEm: agora,
-        totalVendido: somaTotalCaixa,
+        totalVendido: somaTotal,
         dinheiro: totalDinheiro,
         pix: totalPix,
         cartao: totalCartao
@@ -200,17 +306,18 @@ export default function Relatorio({
 
       setCaixaAberto(null);
       await recarregarDados();
+      alert("Caixa fechado com sucesso e PDF gerado!");
     } catch (err) {
-      console.error("Erro ao fechar caixa no banco:", err);
+      console.error("Erro ao fechar caixa:", err);
+      alert("Erro ao fechar o caixa: " + err.message);
+    } finally {
+      setFechandoCaixa(false);
     }
-
-    setTimeout(() => {
-      window.print();
-    }, 300);
   }
 
   async function handleLimparVendasAntigas() {
-    if (!confirm("Deseja arquivar e limpar do sistema as vendas com mais de 30 dias para liberar memória?")) return;
+    if (!confirm("Atenção: Esta ação irá excluir permanentemente as vendas com mais de 30 dias do banco de dados e consolidar o valor no histórico para otimizar a memória. Deseja continuar?")) return;
+    if (processandoLimpeza) return;
     setProcessandoLimpeza(true);
     try {
       const agora = new Date();
@@ -234,7 +341,7 @@ export default function Relatorio({
       }, { merge: true });
 
       setTotalHistoricoConsolidado(novoTotalConsolidado);
-      alert(`Limpeza concluída! ${vendasAntigas.length} vendas antigas foram arquivadas com sucesso.`);
+      alert(`Limpeza concluída! ${vendasAntigas.length} vendas antigas foram excluídas e consolidadas com sucesso.`);
       await recarregarDados();
     } catch (err) {
       alert("Erro ao limpar vendas antigas: " + err.message);
@@ -245,6 +352,85 @@ export default function Relatorio({
 
   return (
     <div style={{ width: "100%", boxSizing: "border-box" }}>
+      <style>{`
+        @media print {
+          @page {
+            size: 80mm auto;
+            margin: 0mm;
+          }
+          body * { visibility: hidden !important; }
+          .print-recibo-local, .print-recibo-local * { visibility: visible !important; }
+          .print-recibo-local { 
+            display: block !important; 
+            position: absolute !important; 
+            left: 0 !important; 
+            top: 0 !important; 
+            width: 80mm !important;
+            background: #fff !important; 
+            color: #000 !important; 
+            font-family: 'Courier New', Courier, monospace !important; 
+            font-size: 13px !important;
+            font-weight: bold !important;
+            padding: 1mm !important;
+            margin: 0 !important;
+            box-sizing: border-box !important;
+          }
+        }
+        @media screen {
+          .print-recibo-local { display: none; }
+        }
+      `}</style>
+
+      {/* MOLDE EXCLUSIVO PARA REIMPRESSÃO TÉRMICA VERTICAL (80mm) */}
+      {vendaReimprimirLocal && (
+        <div className="print-recibo-local" style={{ color: "#000", background: "#fff", fontWeight: "bold" }}>
+          <div style={{ textAlign: "center", marginBottom: "8px" }}>
+            <h2 style={{ margin: 0, fontSize: "16px", fontWeight: "bold" }}>LIFE SURF</h2>
+            <p style={{ margin: "2px 0", fontSize: "12px" }}>COMPROVANTE DE VENDA</p>
+            <p style={{ margin: "2px 0", fontSize: "11px" }}>Pedido: #{vendaReimprimirLocal.id.slice(-6).toUpperCase()}</p>
+            <p style={{ margin: "2px 0", fontSize: "11px" }}>{vendaReimprimirLocal.data?.toDate ? vendaReimprimirLocal.data.toDate().toLocaleString("pt-BR") : new Date().toLocaleString("pt-BR")}</p>
+          </div>
+          <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "12px" }}>
+            <span>ITEM / QTD x VL.UN</span>
+            <span>TOTAL</span>
+          </div>
+          <div style={{ borderBottom: "1px solid #000", margin: "4px 0 6px 0" }}></div>
+          {vendaReimprimirLocal.itens?.map((item, i) => (
+            <div key={i} style={{ marginBottom: "6px", fontSize: "12px" }}>
+              <div>{item.nome} {item.tamanhoSelecionado ? `[Tam: ${item.tamanhoSelecionado}]` : ""}</div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>{item.quantidade} un x R$ {Number(item.precoUnitario).toFixed(2)}</span>
+                <span>R$ {(item.quantidade * item.precoUnitario).toFixed(2)}</span>
+              </div>
+            </div>
+          ))}
+          {vendaReimprimirLocal.infoTroca?.itemTrocado && (
+            <div style={{ fontSize: "11px", marginTop: "4px", borderTop: "1px solid #000", paddingTop: "4px" }}>
+              <strong>Obs:</strong> {vendaReimprimirLocal.infoTroca.itemTrocado}
+            </div>
+          )}
+          <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
+            <span>Subtotal:</span>
+            <span>R$ {Number(vendaReimprimirLocal.subtotalBruto || vendaReimprimirLocal.total).toFixed(2)}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "14px", marginTop: "4px" }}>
+            <span>TOTAL PAGO:</span>
+            <span>R$ {Number(vendaReimprimirLocal.total || 0).toFixed(2)}</span>
+          </div>
+          <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
+          <div style={{ textAlign: "center", fontSize: "12px" }}>
+            <p style={{ margin: "2px 0" }}>Forma: {vendaReimprimirLocal.formaPagamento}</p>
+            <p style={{ margin: "2px 0" }}>Modo: {(vendaReimprimirLocal.tipoVenda || "varejo").toUpperCase()}</p>
+          </div>
+          <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
+          <div style={{ textAlign: "center", fontSize: "11px", marginTop: "8px" }}>
+            OBRIGADO PELA PREFERÊNCIA! VOLTE SEMPRE!
+          </div>
+        </div>
+      )}
+
       <h2 style={{ color: cores.texto, marginTop: 0 }}>📊 Relatórios & Fechamento de Caixa</h2>
 
       <div style={{ marginBottom: "40px" }}>
@@ -268,19 +454,19 @@ export default function Relatorio({
         {caixaAberto ? (
           <div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "15px", marginBottom: "20px" }}>
-              <div style={{ border: `1px solid ${cores.borda}`, padding: "15px", borderRadius: "8px" }}>
+              <div style={{ border: `1px solid ${cores.borda}`, padding: "15px", borderRadius: "8px", background: cores.bgCard }}>
                 <span style={{ fontSize: "12px", color: cores.textoSecundario }}>💵 Dinheiro</span>
                 <h3 style={{ margin: "5px 0 0 0", color: "#38a169" }}>R$ {totalDinheiro.toFixed(2)}</h3>
               </div>
-              <div style={{ border: `1px solid ${cores.borda}`, padding: "15px", borderRadius: "8px" }}>
+              <div style={{ border: `1px solid ${cores.borda}`, padding: "15px", borderRadius: "8px", background: cores.bgCard }}>
                 <span style={{ fontSize: "12px", color: cores.textoSecundario }}>💠 Pix</span>
                 <h3 style={{ margin: "5px 0 0 0", color: "#00b4d8" }}>R$ {totalPix.toFixed(2)}</h3>
               </div>
-              <div style={{ border: `1px solid ${cores.borda}`, padding: "15px", borderRadius: "8px" }}>
+              <div style={{ border: `1px solid ${cores.borda}`, padding: "15px", borderRadius: "8px", background: cores.bgCard }}>
                 <span style={{ fontSize: "12px", color: cores.textoSecundario }}>💳 Cartão</span>
                 <h3 style={{ margin: "5px 0 0 0", color: "#3182ce" }}>R$ {totalCartao.toFixed(2)}</h3>
               </div>
-              <div style={{ border: `2px solid #28a745`, padding: "15px", borderRadius: "8px" }}>
+              <div style={{ border: `2px solid #28a745`, padding: "15px", borderRadius: "8px", background: cores.bgCard }}>
                 <span style={{ fontSize: "12px", color: cores.textoSecundario, fontWeight: "bold" }}>💰 SOMA TOTAL DO CAIXA</span>
                 <h3 style={{ margin: "5px 0 0 0", color: cores.texto, fontSize: "20px" }}>R$ {somaTotalCaixa.toFixed(2)}</h3>
               </div>
@@ -289,9 +475,10 @@ export default function Relatorio({
             <div style={{ display: "flex", gap: "15px", marginBottom: "25px", flexWrap: "wrap" }}>
               <button 
                 onClick={emitirFechamentoPdfEFecharCaixa}
-                style={{ background: "#e53e3e", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}
+                disabled={fechandoCaixa}
+                style={{ background: "#e53e3e", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", opacity: fechandoCaixa ? 0.7 : 1 }}
               >
-                🔒 Fechar Caixa & Imprimir / Salvar PDF
+                {fechandoCaixa ? "Gerando Relatório e Fechando..." : "🔒 Fechar Caixa & Baixar PDF"}
               </button>
             </div>
 
@@ -368,7 +555,7 @@ export default function Relatorio({
             </div>
           </div>
         ) : (
-          <div style={{ padding: "20px", background: cores.bgCardSecundario, borderRadius: "8px", textAlign: "center" }}>
+          <div style={{ padding: "20px", background: cores.bgCardSecundario || cores.bgCard, borderRadius: "8px", textAlign: "center", border: `1px solid ${cores.borda}` }}>
             <p style={{ color: cores.textoSecundario, marginBottom: "15px" }}>O caixa está fechado no momento.</p>
             <button
               onClick={() => setModalAbertura(true)}
@@ -383,20 +570,20 @@ export default function Relatorio({
       <div style={{ borderTop: `1px solid ${cores.borda}`, paddingTop: "25px", marginTop: "30px" }}>
         <h3 style={{ color: cores.texto, fontSize: "16px" }}>🗄️ Manutenção & Histórico (+30 Dias)</h3>
         <p style={{ color: cores.textoSecundario, fontSize: "13px", marginBottom: "15px" }}>
-          Total acumulado em vendas arquivadas: <b>R$ {totalHistoricoConsolidado.toFixed(2)}</b>
+          Total acumulado em vendas consolidadas: <b>R$ {totalHistoricoConsolidado.toFixed(2)}</b>
         </p>
         <button
           onClick={handleLimparVendasAntigas}
           disabled={processandoLimpeza}
-          style={{ background: "#6366f1", color: "#fff", border: "none", padding: "10px 16px", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "13px" }}
+          style={{ background: "#6366f1", color: "#fff", border: "none", padding: "10px 16px", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "13px", opacity: processandoLimpeza ? 0.7 : 1 }}
         >
-          {processandoLimpeza ? "Limpando e Arquivando..." : "🗑️ Limpar Vendas com Mais de 30 Dias (Otimizar Memória)"}
+          {processandoLimpeza ? "Excluindo e Consolidando..." : "🗑️ Excluir Vendas com Mais de 30 Dias (Otimizar Memória)"}
         </button>
       </div>
 
       {modalAbertura && (
         <div style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh", background: "rgba(0,0,0,0.7)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000, padding: "20px", boxSizing: "border-box" }}>
-          <div style={{ background: cores.bgGeral, border: `1px solid ${cores.borda}`, padding: "25px", borderRadius: "12px", width: "100%", maxWidth: "400px" }}>
+          <div style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto, border: `1px solid ${cores.borda}`, padding: "25px", borderRadius: "12px", width: "100%", maxWidth: "400px" }}>
             <h3 style={{ color: cores.texto, marginTop: 0 }}>🔓 Abertura de Caixa Diário</h3>
             <form onSubmit={handleAbrirCaixa}>
               <div style={{ marginBottom: "15px" }}>
@@ -407,6 +594,7 @@ export default function Relatorio({
                   value={trocoInicialInput} 
                   onChange={(e) => setTrocoInicialInput(e.target.value)} 
                   style={inputStyle} 
+                  autoFocus
                   required 
                 />
               </div>
@@ -433,7 +621,7 @@ export default function Relatorio({
 
       {vendaEditando && (
         <div style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh", background: "rgba(0,0,0,0.7)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000, padding: "20px", boxSizing: "border-box" }}>
-          <div style={{ background: cores.bgGeral, border: `1px solid ${cores.borda}`, padding: "25px", borderRadius: "12px", width: "100%", maxWidth: "600px", maxHeight: "90vh", overflowY: "auto" }}>
+          <div style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto, border: `1px solid ${cores.borda}`, padding: "25px", borderRadius: "12px", width: "100%", maxWidth: "600px", maxHeight: "90vh", overflowY: "auto" }}>
             <h3 style={{ color: cores.texto, marginTop: 0 }}>✏️ Editar Venda Atual</h3>
             
             <form onSubmit={handleSalvarEdicaoVenda}>
@@ -444,12 +632,12 @@ export default function Relatorio({
                   onChange={(e) => setNovaFormaPagamento(e.target.value)}
                   style={inputStyle}
                 >
-                  <option value="Dinheiro" style={{ background: cores.bgGeral }}>Dinheiro</option>
-                  <option value="Pix" style={{ background: cores.bgGeral }}>Pix</option>
-                  <option value="Cartão Débito" style={{ background: cores.bgGeral }}>Cartão Débito</option>
-                  <option value="Cartão Crédito" style={{ background: cores.bgGeral }}>Cartão Crédito</option>
-                  <option value="Troca" style={{ background: cores.bgGeral }}>Troca</option>
-                  <option value="A Ver" style={{ background: cores.bgGeral }}>A Ver</option>
+                  <option value="Dinheiro" style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>Dinheiro</option>
+                  <option value="Pix" style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>Pix</option>
+                  <option value="Cartão Débito" style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>Cartão Débito</option>
+                  <option value="Cartão Crédito" style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>Cartão Crédito</option>
+                  <option value="Troca" style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>Troca</option>
+                  <option value="A Ver" style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>A Ver</option>
                 </select>
               </div>
 
@@ -460,10 +648,10 @@ export default function Relatorio({
                   onChange={(e) => setNovoTipoVenda(e.target.value)}
                   style={inputStyle}
                 >
-                  <option value="varejo" style={{ background: cores.bgGeral }}>Varejo</option>
-                  <option value="atacado" style={{ background: cores.bgGeral }}>Atacado</option>
-                  <option value="troca" style={{ background: cores.bgGeral }}>Troca</option>
-                  <option value="a_ver" style={{ background: cores.bgGeral }}>A Ver</option>
+                  <option value="varejo" style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>Varejo</option>
+                  <option value="atacado" style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>Atacado</option>
+                  <option value="troca" style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>Troca</option>
+                  <option value="a_ver" style={{ background: cores.bgCard || cores.bgGeral, color: cores.texto }}>A Ver</option>
                 </select>
               </div>
 

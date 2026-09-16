@@ -4,6 +4,7 @@ import Estoque from "./Estoque";
 import Relatorio from "./Relatorio";
 import Configuracoes from "./Configuracoes";
 import A_ver from "./A_ver";
+import PecasComFalha from "./PecasComFalha";
 
 export default function MenuPrincipal(props) {
   const { 
@@ -41,9 +42,26 @@ export default function MenuPrincipal(props) {
           transform: translateY(-3px);
           box-shadow: 0 6px 20px rgba(40, 167, 69, 0.2);
         }
+        .menu-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 25px;
+          width: 100%;
+          box-sizing: border-box;
+        }
+        @media (max-width: 900px) {
+          .menu-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+        }
+        @media (max-width: 600px) {
+          .menu-grid {
+            grid-template-columns: 1fr;
+          }
+        }
       `}</style>
 
-      {/* CABEÇALHO DO MENU DE CARDS */}
+      {/* CABEÇALHO DO MENU PRINCIPAL (VOLTA PARA O HOME PRINCIPAL) */}
       {telaAtiva === "menu" && (
         <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${cores.borda}`, paddingBottom: "15px", marginBottom: "20px", width: "100%" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -59,7 +77,7 @@ export default function MenuPrincipal(props) {
                 onClick={voltarHome}
                 style={{ padding: "8px 14px", borderRadius: "6px", border: `1px solid ${cores.borda}`, background: cores.bgCardSecundario, color: cores.texto, cursor: "pointer", fontWeight: "bold", fontSize: "13px" }}
               >
-                🏠 Início
+                ⬅️ Voltar ao Painel Inicial
               </button>
             )}
             <button
@@ -78,7 +96,7 @@ export default function MenuPrincipal(props) {
         </header>
       )}
 
-      {/* CABEÇALHO DENTRO DAS TELAS OPERACIONAIS */}
+      {/* CABEÇALHO DENTRO DAS TELAS OPERACIONAIS (VOLTA PARA O MENU PRINCIPAL) */}
       {telaAtiva !== "menu" && (
         <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${cores.borda}`, paddingBottom: "15px", marginBottom: "20px", width: "100%" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -87,6 +105,7 @@ export default function MenuPrincipal(props) {
               {telaAtiva === "estoque" && "Produtos e Estoque"}
               {telaAtiva === "historico" && "Relatórios & Caixa"}
               {telaAtiva === "a_ver" && "Mercadorias A Ver / Prova"}
+              {telaAtiva === "pecas_falha" && "Peças com Falha"}
               {telaAtiva === "config" && "Configurações"}
             </h1>
             {telaAtiva === "pdv" && (
@@ -122,13 +141,13 @@ export default function MenuPrincipal(props) {
         </header>
       )}
 
-      {/* TELA DE MENU PRINCIPAL (5 CARDS) */}
+      {/* TELA DE MENU PRINCIPAL (PAINEL CENTRALIZADO EM GRID 3x2) */}
       {telaAtiva === "menu" && (
-        <div style={{ width: "100%", padding: "40px 20px", boxSizing: "border-box", textAlign: "center" }}>
+        <div style={{ width: "100%", maxWidth: "1200px", margin: "0 auto", padding: "40px 30px 60px 30px", boxSizing: "border-box", textAlign: "center" }}>
           <h1 style={{ marginBottom: "10px", color: cores.texto, fontSize: "28px" }}>Escolha uma Opção</h1>
           <p style={{ color: cores.textoSecundario, marginBottom: "40px", fontSize: "15px" }}>Gerencie sua frente de caixa, estoque e relatórios de forma isolada.</p>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "25px", width: "100%" }}>
+          <div className="menu-grid">
             
             <div 
               className="menu-card"
@@ -171,6 +190,16 @@ export default function MenuPrincipal(props) {
               <div style={{ fontSize: "36px", marginBottom: "10px" }}>🛍️</div>
               <h3 style={{ margin: "0 0 6px 0", color: cores.texto, fontSize: "17px" }}>Mercadorias A Ver</h3>
               <p style={{ fontSize: "12px", color: cores.textoSecundario, margin: 0 }}>Controle de provas e pagamentos</p>
+            </div>
+
+            <div 
+              className="menu-card"
+              onClick={() => setTelaAtiva("pecas_falha")}
+              style={{ background: cores.bgCard, padding: "30px 20px", borderRadius: "12px", cursor: "pointer", border: `1px solid ${cores.borda}`, transition: "0.2s" }}
+            >
+              <div style={{ fontSize: "36px", marginBottom: "10px" }}>⚠️</div>
+              <h3 style={{ margin: "0 0 6px 0", color: cores.texto, fontSize: "17px" }}>Peças com Falha</h3>
+              <p style={{ fontSize: "12px", color: cores.textoSecundario, margin: 0 }}>Controle de peças com defeito</p>
             </div>
 
             <div 
@@ -239,6 +268,16 @@ export default function MenuPrincipal(props) {
           cores={cores}
           usuarioLogado={usuarioLogado}
           voltarHome={() => setTelaAtiva("menu")}
+        />
+      )}
+
+      {telaAtiva === "pecas_falha" && (
+        <PecasComFalha
+          cores={cores}
+          usuarioLogado={usuarioLogado}
+          produtos={produtos}
+          recarregarDados={carregarDados}
+          irParaEstoque={() => setTelaAtiva("estoque")}
         />
       )}
 

@@ -5,7 +5,8 @@ import {
   doc,
   runTransaction,
   serverTimestamp,
-  addDoc
+  addDoc,
+  getDoc
 } from "firebase/firestore";
 
 const TAXAS_CARTAO = {
@@ -57,6 +58,18 @@ export default function Pdv({
   const [indiceFocoBusca, setIndiceFocoBusca] = useState(0);
   const [processandoVenda, setProcessandoVenda] = useState(false);
 
+  // Etapa central do fluxo de teclado solicitada na arquitetura
+  const [etapaTeclado, setEtapaTeclado] = useState("busca");
+
+  // Configurações da Loja puxadas do Firestore
+  const [configLoja, setConfigLoja] = useState({
+    nomeLoja: "LIFESURF",
+    logoUrl: "",
+    endereco: "",
+    telefone: "",
+    mensagemRodape: "OBRIGADO PELA PREFERENCIA! VOLTE SEMPRE!"
+  });
+
   const [produtoModal, setProdutoModal] = useState(null);
   const [qtdInput, setQtdInput] = useState("1");
   const inputQtdRef = useRef(null);
@@ -67,23 +80,39 @@ export default function Pdv({
   const inputPrecoRef = useRef(null);
 
   const [modalAtalhosAberto, setModalAtalhosAberto] = useState(false);
+  const [descontoAplicado, setDescontoAplicado] = useState({ tipo: "reais", valor: 0, totalDescontado: 0 });
 
-  // Modal de Tamanho Avançado no Carrinho (Tecla Shift)
+  // Modal de Tamanho Avançado no Carrinho (Tecla F2)
   const [modalTamanhoCarrinhoAberto, setModalTamanhoCarrinhoAberto] = useState(false);
   const [itemSelecionadoCarrinhoIdx, setItemSelecionadoCarrinhoIdx] = useState(null);
-  const [etapaTamanhoModal, setEtapaTamanhoModal] = useState("lista"); // "lista" | "qtd"
+  const [etapaTamanhoModal, setEtapaTamanhoModal] = useState("lista");
   const [tamanhoSelecionadoTemp, setTamanhoSelecionadoTemp] = useState("");
   const [qtdTamanhoTemp, setQtdTamanhoTemp] = useState("1");
   const [tamanhosDisponiveisTemp, setTamanhosDisponiveisTemp] = useState({});
   const inputQtdTamRef = useRef(null);
 
-  const [modalTrocaInfoAberto, setModalTrocaInfoAberto] = useState(false);
-  const [itemTrocadoInput, setItemTrocadoInput] = useState("");
-  const [valorDiferencaInput, setValorDiferencaInput] = useState("");
-  const [levouAlgoMaisInput, setLevouAlgoMaisInput] = useState("");
-  const inputTroca1Ref = useRef(null);
-  const inputTroca2Ref = useRef(null);
-  const inputTroca3Ref = useRef(null);
+  // Modos de Troca Avançada
+  const [modalTipoTrocaAberto, setModalTipoTrocaAberto] = useState(false);
+  const [indiceTrocaTipo, setIndiceTrocaTipo] = useState(0);
+
+  const [modalTrocaTamanhoAberto, setModalTrocaTamanhoAberto] = useState(false);
+  const [tamanhoDevolvidoTroca, setTamanhoDevolvidoTroca] = useState("");
+  const [tamanhoNovoTroca, setTamanhoNovoTroca] = useState("");
+  const [tamanhosDisponiveisDevolucao, setTamanhosDisponiveisDevolucao] = useState({});
+  const [tamanhosDisponiveisNovo, setTamanhosDisponiveisNovo] = useState({});
+  const [tipoPrecoTrocaTamanho, setTipoPrecoTrocaTamanho] = useState("varejo");
+
+  const [modalTrocaOutroProdutoAberto, setModalTrocaOutroProdutoAberto] = useState(false);
+  const [buscaTrocaProduto, setBuscaTrocaProduto] = useState("");
+  const [produtoSubstitutoTroca, setProdutoSubstitutoTroca] = useState(null);
+  const [tamanhoSubstitutoTroca, setTamanhoSubstitutoTroca] = useState("");
+  const [tamanhosSubstitutosDisponiveis, setTamanhosSubstitutosDisponiveis] = useState({});
+  const [tipoPrecoOutroProd, setTipoPrecoOutroProd] = useState("varejo");
+
+  const [modalTrocaFalhaAberto, setModalTrocaFalhaAberto] = useState(false);
+  const [descricaoFalha, setDescricaoFalha] = useState("");
+  const [tamanhoFalhaDevolvido, setTamanhoFalhaDevolvido] = useState("");
+  const [valorDiferencaFalha, setValorDiferencaFalha] = useState("0.00");
 
   const [modalAVerInfoAberto, setModalAVerInfoAberto] = useState(false);
   const [nomeResponsavelAVer, setNomeResponsavelAVer] = useState("");
@@ -95,7 +124,6 @@ export default function Pdv({
   const [modalDescontoAberto, setModalDescontoAberto] = useState(false);
   const [tipoDesconto, setTipoDesconto] = useState("reais");
   const [valorDescontoInput, setValorDescontoInput] = useState("");
-  const [descontoAplicado, setDescontoAplicado] = useState({ tipo: "reais", valor: 0, totalDescontado: 0 });
   const inputDescontoRef = useRef(null);
 
   const [modalFormaPagtoAberto, setModalFormaPagtoAberto] = useState(false);
@@ -114,48 +142,59 @@ export default function Pdv({
   const isCompartilhado = usuarioLogado?.email && EMAILS_COMPARTILHADOS.includes(usuarioLogado.email);
   const lojaIdAtual = isCompartilhado ? "compartilhado_jarbas_lucas" : (usuarioLogado?.uid || "loja_padrao");
 
-  // Cores dinâmicas por modo de venda
+  useEffect(() => {
+    async function carregarConfigLoja() {
+      try {
+        const snap = await getDoc(doc(db, "configuracoes", lojaIdAtual));
+        if (snap.exists()) {
+          const d = snap.data();
+          setConfigLoja({
+            nomeLoja: d.nomeLoja || "LIFESURF",
+            logoUrl: d.logoUrl || "",
+            endereco: d.endereco || "",
+            telefone: d.telefone || "",
+            mensagemRodape: d.mensagemRodape || "OBRIGADO PELA PREFERENCIA! VOLTE SEMPRE!"
+          });
+        }
+      } catch (err) {
+        console.error("Erro ao carregar config da loja no PDV:", err);
+      }
+    }
+    carregarConfigLoja();
+  }, [lojaIdAtual]);
+
   const corModo =
     tipoTabela === "atacado" ? "#007bff" :
     tipoTabela === "troca" ? "#e67e22" :
     tipoTabela === "a_ver" ? "#8e44ad" : "#28a745";
 
+  // Gerenciamento consistente de Foco Automático por Etapa
   useEffect(() => {
-    if (produtoModal && inputQtdRef.current) {
-      inputQtdRef.current.focus();
-      inputQtdRef.current.select();
-    } else if (itemEditandoPreco && inputPrecoRef.current) {
-      inputPrecoRef.current.focus();
-      inputPrecoRef.current.select();
-    } else if (modalTrocaInfoAberto && inputTroca1Ref.current) {
-      inputTroca1Ref.current.focus();
-    } else if (modalAVerInfoAberto && inputAVer1Ref.current) {
-      inputAVer1Ref.current.focus();
-    } else if (modalDescontoAberto && inputDescontoRef.current) {
-      inputDescontoRef.current.focus();
-      inputDescontoRef.current.select();
-    } else if (modalDinheiroAberto && inputDinheiroRef.current) {
-      inputDinheiroRef.current.focus();
-      inputDinheiroRef.current.select();
-    } else if (etapaTamanhoModal === "qtd" && inputQtdTamRef.current) {
-      inputQtdTamRef.current.focus();
-      inputQtdTamRef.current.select();
-    } else if (
-      !produtoModal &&
-      !itemEditandoPreco &&
-      !modalAtalhosAberto &&
-      !modalDescontoAberto &&
-      !modalFormaPagtoAberto &&
-      !modalCartaoAberto &&
-      !modalDinheiroAberto &&
-      !modalTrocaInfoAberto &&
-      !modalAVerInfoAberto &&
-      !modalTamanhoCarrinhoAberto &&
-      inputBuscaRef.current
-    ) {
-      inputBuscaRef.current.focus();
+    if (etapaTeclado === "busca") {
+      setTimeout(() => inputBuscaRef.current?.focus(), 50);
+    } else if (etapaTeclado === "adicionarItem") {
+      setTimeout(() => {
+        if (inputQtdRef.current) {
+          inputQtdRef.current.focus();
+          inputQtdRef.current.select();
+        }
+      }, 50);
+    } else if (etapaTeclado === "desconto") {
+      setTimeout(() => {
+        if (inputDescontoRef.current) {
+          inputDescontoRef.current.focus();
+          inputDescontoRef.current.select();
+        }
+      }, 50);
+    } else if (etapaTeclado === "dinheiro") {
+      setTimeout(() => {
+        if (inputDinheiroRef.current) {
+          inputDinheiroRef.current.focus();
+          inputDinheiroRef.current.select();
+        }
+      }, 50);
     }
-  }, [produtoModal, itemEditandoPreco, modalAtalhosAberto, modalDescontoAberto, modalFormaPagtoAberto, modalCartaoAberto, modalDinheiroAberto, modalTrocaInfoAberto, modalAVerInfoAberto, modalTamanhoCarrinhoAberto, etapaTamanhoModal]);
+  }, [etapaTeclado]);
 
   useEffect(() => {
     if (tipoTabela === "varejo" || tipoTabela === "atacado") {
@@ -173,8 +212,8 @@ export default function Pdv({
     }
   }, [tipoTabela, produtos]);
 
-  function getPrecoAtual(produto) {
-    if (tipoTabela === "atacado") {
+  function getPrecoAtual(produto, modoPreco = tipoTabela) {
+    if (modoPreco === "atacado") {
       return Number(produto.precoAtacado || produto.precoVarejo || produto.preco || 0);
     }
     return Number(produto.precoVarejo || produto.preco || 0);
@@ -187,10 +226,14 @@ export default function Pdv({
     }
     setProdutoModal(produto);
     setQtdInput("1");
+    setEtapaTeclado("adicionarItem");
   }
 
   function confirmarAdicaoModal(e) {
-    if (e) e.preventDefault();
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     const quantidade = parseInt(qtdInput, 10);
 
     if (isNaN(quantidade) || quantidade <= 0) {
@@ -236,6 +279,7 @@ export default function Pdv({
     setProdutoModal(null);
     setBuscaPdv("");
     setIndiceFocoBusca(0);
+    setEtapaTeclado("busca");
   }
 
   function abrirModalTamanhoCarrinho(idx) {
@@ -262,7 +306,10 @@ export default function Pdv({
   }
 
   function confirmarQtdTamanhoModal(e) {
-    if (e) e.preventDefault();
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     const qtdRetirada = parseInt(qtdTamanhoTemp, 10);
     if (isNaN(qtdRetirada) || qtdRetirada <= 0) {
       alert("Informe uma quantidade válida!");
@@ -303,7 +350,10 @@ export default function Pdv({
   }
 
   function salvarPrecoItemModal(e) {
-    if (e) e.preventDefault();
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     const val = parseFloat(novoPrecoInput);
     if (isNaN(val) || val < 0) {
       alert("Informe um preço válido!");
@@ -316,6 +366,7 @@ export default function Pdv({
       )
     );
     setItemEditandoPreco(null);
+    setEtapaTeclado("busca");
   }
 
   function removerDoCarrinho(id) {
@@ -337,8 +388,30 @@ export default function Pdv({
   }
 
   const subtotalComDesconto = tipoTabela === "a_ver" ? 0 : Math.max(0, subtotalBruto - valorDescontoCalculado);
-  const formasPagamentoDisponiveis = tipoTabela === "troca" ? ["Troca", ...FORMAS_PAGAMENTO] : FORMAS_PAGAMENTO;
+  const formasPagamentoDisponiveis = FORMAS_PAGAMENTO;
 
+  // ESC Universal (Voltar Etapa)
+  function voltarComEscape(e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (modalAtalhosAberto) { setModalAtalhosAberto(false); setEtapaTeclado("busca"); return; }
+    if (modalDinheiroAberto) { setModalDinheiroAberto(false); setModalFormaPagtoAberto(true); setEtapaTeclado("pagamento"); return; }
+    if (modalCartaoAberto) { setModalCartaoAberto(false); setModalFormaPagtoAberto(true); setEtapaTeclado("pagamento"); return; }
+    if (modalFormaPagtoAberto) { setModalFormaPagtoAberto(false); setModalDescontoAberto(true); setEtapaTeclado("desconto"); return; }
+    if (modalDescontoAberto) { setModalDescontoAberto(false); setEtapaTeclado("busca"); return; }
+    if (produtoModal) { setProdutoModal(null); setEtapaTeclado("busca"); return; }
+    if (itemEditandoPreco) { setItemEditandoPreco(null); setEtapaTeclado("busca"); return; }
+    if (modalTamanhoCarrinhoAberto) { setModalTamanhoCarrinhoAberto(false); setEtapaTamanhoModal("lista"); setEtapaTeclado("busca"); return; }
+    if (modalTipoTrocaAberto) { setModalTipoTrocaAberto(false); setEtapaTeclado("busca"); return; }
+    if (modalTrocaTamanhoAberto) { setModalTrocaTamanhoAberto(false); setModalTipoTrocaAberto(true); return; }
+    if (modalTrocaOutroProdutoAberto) { setModalTrocaOutroProdutoAberto(false); setModalTipoTrocaAberto(true); return; }
+    if (modalTrocaFalhaAberto) { setModalTrocaFalhaAberto(false); setModalTipoTrocaAberto(true); return; }
+    if (modalAVerInfoAberto) { setModalAVerInfoAberto(false); setEtapaTeclado("busca"); return; }
+  }
+
+  // Lógica Central de Teclado Global
   useEffect(() => {
     function handleTecladoGlobal(e) {
       const isInputBuscaFocado = document.activeElement === inputBuscaRef.current;
@@ -350,19 +423,51 @@ export default function Pdv({
       }
 
       if (e.key === "Escape") {
-        if (modalAtalhosAberto) { setModalAtalhosAberto(false); return; }
-        if (modalTrocaInfoAberto) { setModalTrocaInfoAberto(false); return; }
-        if (modalAVerInfoAberto) { setModalAVerInfoAberto(false); return; }
-        if (modalDescontoAberto) { setModalDescontoAberto(false); return; }
-        if (modalFormaPagtoAberto) { setModalFormaPagtoAberto(false); return; }
-        if (modalCartaoAberto) { setModalCartaoAberto(false); setModalFormaPagtoAberto(true); return; }
-        if (modalDinheiroAberto) { setModalDinheiroAberto(false); setModalFormaPagtoAberto(true); return; }
-        if (produtoModal) { setProdutoModal(null); return; }
-        if (itemEditandoPreco) { setItemEditandoPreco(null); return; }
-        if (modalTamanhoCarrinhoAberto) { setModalTamanhoCarrinhoAberto(false); return; }
+        voltarComEscape(e);
+        return;
       }
 
-      const anyModalOpen = modalAtalhosAberto || modalTrocaInfoAberto || modalAVerInfoAberto || modalDescontoAberto || modalFormaPagtoAberto || modalCartaoAberto || modalDinheiroAberto || produtoModal || itemEditandoPreco || modalTamanhoCarrinhoAberto;
+      // Navegação por teclado no Modal de Escolha de Troca
+      if (modalTipoTrocaAberto) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setIndiceTrocaTipo((prev) => (prev < 2 ? prev + 1 : 0));
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setIndiceTrocaTipo((prev) => (prev > 0 ? prev - 1 : 2));
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          if (indiceTrocaTipo === 0) {
+            setModalTipoTrocaAberto(false);
+            const item = carrinho[0];
+            const prodReal = produtos.find(p => p.id === item.id);
+            const prateleira = prodReal ? parseTamanhos(prodReal.tamanhos) : parseTamanhos(item.tamanhosDisponiveis);
+            setTamanhosDisponiveisDevolucao(prateleira);
+            setTamanhosDisponiveisNovo(prateleira);
+            setTamanhoDevolvidoTroca("");
+            setTamanhoNovoTroca("");
+            setTipoPrecoTrocaTamanho(tipoTabela);
+            setModalTrocaTamanhoAberto(true);
+          } else if (indiceTrocaTipo === 1) {
+            setModalTipoTrocaAberto(false);
+            setBuscaTrocaProduto("");
+            setProdutoSubstitutoTroca(null);
+            setTamanhoSubstitutoTroca("");
+            setTamanhosSubstitutosDisponiveis({});
+            setTipoPrecoOutroProd(tipoTabela);
+            setModalTrocaOutroProdutoAberto(true);
+          } else if (indiceTrocaTipo === 2) {
+            setModalTipoTrocaAberto(false);
+            setDescricaoFalha("");
+            setTamanhoFalhaDevolvido(carrinho[0]?.tamanhoSelecionado || "");
+            setValorDiferencaFalha("0.00");
+            setModalTrocaFalhaAberto(true);
+          }
+        }
+        return;
+      }
+
+      const anyModalOpen = modalAtalhosAberto || modalDescontoAberto || modalFormaPagtoAberto || modalCartaoAberto || modalDinheiroAberto || produtoModal || itemEditandoPreco || modalTamanhoCarrinhoAberto || modalTipoTrocaAberto || modalTrocaTamanhoAberto || modalTrocaOutroProdutoAberto || modalTrocaFalhaAberto || modalAVerInfoAberto;
 
       if (!anyModalOpen && !isInputBuscaFocado) {
         if (buscaPdv.trim() === "") {
@@ -392,7 +497,7 @@ export default function Pdv({
         }
       }
 
-      if (e.key === "Shift" && !anyModalOpen && buscaPdv.trim() === "" && carrinho.length > 0 && !isInputBuscaFocado) {
+      if (e.key === "F2" && !anyModalOpen && buscaPdv.trim() === "" && carrinho.length > 0 && !isInputBuscaFocado) {
         e.preventDefault();
         abrirModalTamanhoCarrinho(carrinho.length - 1);
         return;
@@ -418,18 +523,17 @@ export default function Pdv({
           const formaEscolhida = formasPagamentoDisponiveis[indiceFormaPagto];
           setModalFormaPagtoAberto(false);
 
-          if (formaEscolhida === "Troca") {
-            const diferencaNum = Number(valorDiferencaInput) || 0;
-            const valorFinalTroca = Math.max(0, subtotalComDesconto + diferencaNum);
-            executarVendaNoBanco(valorFinalTroca, "Troca", null, null);
-          } else if (formaEscolhida === "Cartão de Crédito") {
+          if (formaEscolhida === "Cartão de Crédito") {
             setIndiceParcela(0);
             setModalCartaoAberto(true);
+            setEtapaTeclado("cartao");
           } else if (formaEscolhida === "Dinheiro") {
             setValorEntregueInput("");
             setModalDinheiroAberto(true);
+            setEtapaTeclado("dinheiro");
           } else {
             executarVendaNoBanco(subtotalComDesconto, formaEscolhida, null, null);
+            setEtapaTeclado("busca");
           }
         }
         return;
@@ -454,6 +558,7 @@ export default function Pdv({
           const info = { qtdParcelas: parcelasNum, taxaPercentual: conf.taxa * 100, valorParcela: valorParcela };
 
           setModalCartaoAberto(false);
+          setEtapaTeclado("busca");
           executarVendaNoBanco(totalComTaxa, descPagamento, info, null);
         }
         return;
@@ -462,7 +567,7 @@ export default function Pdv({
 
     window.addEventListener("keydown", handleTecladoGlobal);
     return () => window.removeEventListener("keydown", handleTecladoGlobal);
-  }, [modalDescontoAberto, modalFormaPagtoAberto, modalCartaoAberto, indiceFormaPagto, indiceParcela, subtotalComDesconto, buscaPdv, carrinho, produtoModal, itemEditandoPreco, modalAtalhosAberto, modalDinheiroAberto, modalTrocaInfoAberto, modalAVerInfoAberto, formasPagamentoDisponiveis, valorDiferencaInput]);
+  }, [modalDescontoAberto, modalFormaPagtoAberto, modalCartaoAberto, indiceFormaPagto, indiceParcela, subtotalComDesconto, buscaPdv, carrinho, produtoModal, itemEditandoPreco, modalAtalhosAberto, modalDinheiroAberto, formasPagamentoDisponiveis, modalTipoTrocaAberto, modalTrocaTamanhoAberto, modalTrocaOutroProdutoAberto, modalTrocaFalhaAberto, modalAVerInfoAberto, indiceTrocaTipo]);
 
   function iniciarFluxoFechamentoTeclado() {
     if (carrinho.length === 0) {
@@ -475,10 +580,8 @@ export default function Pdv({
     }
 
     if (tipoTabela === "troca") {
-      setItemTrocadoInput("");
-      setValorDiferencaInput("");
-      setLevouAlgoMaisInput("");
-      setModalTrocaInfoAberto(true);
+      setIndiceTrocaTipo(0);
+      setModalTipoTrocaAberto(true);
       return;
     }
 
@@ -487,18 +590,198 @@ export default function Pdv({
       setDataAVer(new Date().toISOString().split("T")[0]);
       setObservacaoAVer("");
       setModalAVerInfoAberto(true);
+      setEtapaTeclado("aVer");
       return;
     }
 
     setValorDescontoInput("");
     setModalDescontoAberto(true);
+    setEtapaTeclado("desconto");
   }
 
-  function confirmarTrocaEProsseguir(e) {
+  // 1️⃣ Lógica de Troca por Tamanho
+  async function concluirTrocaPorTamanho() {
+    if (!tamanhoDevolvidoTroca || !tamanhoNovoTroca) {
+      alert("Selecione o tamanho devolvido e o novo tamanho!");
+      return;
+    }
+
+    const itemRef = carrinho[0];
+    setProcessandoVenda(true);
+    try {
+      let vendaCriadaId = "";
+      await runTransaction(db, async (transaction) => {
+        const prodDocRef = doc(db, "produtos", itemRef.id);
+        const snap = await transaction.get(prodDocRef);
+        if (!snap.exists()) throw new Error("Produto não encontrado no estoque!");
+
+        const objT = parseTamanhos(snap.data().tamanhos);
+        objT[tamanhoDevolvidoTroca] = (objT[tamanhoDevolvidoTroca] || 0) + itemRef.quantidade;
+        if ((objT[tamanhoNovoTroca] || 0) < itemRef.quantidade) {
+          throw new Error(`Estoque insuficiente para o tamanho ${tamanhoNovoTroca}!`);
+        }
+        objT[tamanhoNovoTroca] -= itemRef.quantidade;
+
+        transaction.update(prodDocRef, { tamanhos: serializeTamanhos(objT) });
+
+        const vendaRef = doc(collection(db, "vendas"));
+        vendaCriadaId = vendaRef.id;
+
+        transaction.set(vendaRef, {
+          data: serverTimestamp(),
+          dataString: new Date().toLocaleDateString("pt-BR"),
+          caixaId: caixaAberto.id,
+          tipoVenda: "troca",
+          operadorEmail: usuarioLogado?.email || "operador",
+          lojaId: lojaIdAtual,
+          itens: [{ ...itemRef, tamanhoSelecionado: `De: ${tamanhoDevolvidoTroca} Para: ${tamanhoNovoTroca}` }],
+          subtotalBruto: 0,
+          desconto: 0,
+          total: 0,
+          formaPagamento: "Troca por Tamanho",
+          infoTroca: { itemTrocado: `Troca de tamanho: ${itemRef.nome} [De ${tamanhoDevolvidoTroca} para ${tamanhoNovoTroca}]`, valorDiferenca: 0 }
+        });
+      });
+
+      const recibo = {
+        id: vendaCriadaId.substring(0, 8).toUpperCase(),
+        dataHora: new Date().toLocaleString("pt-BR"),
+        itens: [{ ...itemRef, tamanhoSelecionado: `De: ${tamanhoDevolvidoTroca} Para: ${tamanhoNovoTroca}` }],
+        subtotalBruto: 0,
+        desconto: 0,
+        total: 0,
+        formaPagamento: "Troca por Tamanho",
+        tipoVenda: "troca"
+      };
+
+      setDadosRecibo(recibo);
+      setDadosReciboLocal(recibo);
+      alert("Troca por tamanho realizada e estoque atualizado com sucesso!");
+      setModalTipoTrocaAberto(false);
+      setModalTrocaTamanhoAberto(false);
+      setCarrinho([]);
+      setEtapaTeclado("busca");
+      await recarregarDados();
+
+      setTimeout(() => { window.print(); }, 300);
+    } catch (err) {
+      alert("Erro na troca por tamanho: " + err.message);
+    } finally {
+      setProcessandoVenda(false);
+    }
+  }
+
+  // 2️⃣ Lógica de Troca por Outro Produto
+  async function confirmarTrocaOutroProduto(e) {
     e.preventDefault();
-    setModalTrocaInfoAberto(false);
+    if (!produtoSubstitutoTroca || !tamanhoSubstitutoTroca) {
+      alert("Selecione o produto substituto e o tamanho!");
+      return;
+    }
+
+    const itemDevolvido = carrinho[0];
+    const precoAntigo = Number(itemDevolvido.precoUnitario) * itemDevolvido.quantidade;
+    const precoNovoUnitario = getPrecoAtual(produtoSubstitutoTroca, tipoPrecoOutroProd);
+    const precoNovoTotal = precoNovoUnitario * itemDevolvido.quantidade;
+    const diferenca = Math.max(0, precoNovoTotal - precoAntigo);
+
+    setCarrinho([{
+      id: produtoSubstitutoTroca.id,
+      nome: produtoSubstitutoTroca.nome,
+      referencia: produtoSubstitutoTroca.referencia || null,
+      codigoBarras: produtoSubstitutoTroca.codigoBarras || null,
+      precoUnitario: precoNovoUnitario,
+      quantidade: itemDevolvido.quantidade,
+      tamanhoSelecionado: tamanhoSubstitutoTroca
+    }]);
+
+    setModalTrocaOutroProdutoAberto(false);
+    setValorDiferencaInput(diferenca.toString());
     setIndiceFormaPagto(0);
     setModalFormaPagtoAberto(true);
+    setEtapaTeclado("pagamento");
+  }
+
+  // 3️⃣ Lógica de Troca por Falha / Defeito
+  async function concluirTrocaPorFalha() {
+    if (!descricaoFalha.trim() || !tamanhoFalhaDevolvido) {
+      alert("Preencha o tamanho da peça e a descrição da falha!");
+      return;
+    }
+
+    const itemRef = carrinho[0];
+    setProcessandoVenda(true);
+    try {
+      let vendaCriadaId = "";
+      await runTransaction(db, async (transaction) => {
+        const prodDocRef = doc(db, "produtos", itemRef.id);
+        const snap = await transaction.get(prodDocRef);
+        if (snap.exists()) {
+          const estoqueAtual = snap.data().estoque || 0;
+          transaction.update(prodDocRef, { estoque: Math.max(0, estoqueAtual - itemRef.quantidade) });
+        }
+
+        const falhaRef = doc(collection(db, "pecas_com_falha"));
+        transaction.set(falhaRef, {
+          lojaId: lojaIdAtual,
+          produtoNome: itemRef.nome,
+          tamanho: tamanhoFalhaDevolvido,
+          falha: descricaoFalha.trim(),
+          cliente: "Cliente / Balcão",
+          status: "pendente",
+          data: serverTimestamp(),
+          dataString: new Date().toLocaleDateString("pt-BR")
+        });
+
+        const difNum = Number(valorDiferencaFalha) || 0;
+        const vendaRef = doc(collection(db, "vendas"));
+        vendaCriadaId = vendaRef.id;
+
+        transaction.set(vendaRef, {
+          data: serverTimestamp(),
+          dataString: new Date().toLocaleDateString("pt-BR"),
+          caixaId: caixaAberto.id,
+          tipoVenda: "troca",
+          operadorEmail: usuarioLogado?.email || "operador",
+          lojaId: lojaIdAtual,
+          itens: [{ ...itemRef, tamanhoSelecionado: tamanhoFalhaDevolvido }],
+          subtotalBruto: difNum,
+          desconto: 0,
+          total: difNum,
+          formaPagamento: "Troca por Falha",
+          infoTroca: { itemTrocado: `Defeito: ${itemRef.nome} (${tamanhoFalhaDevolvido}) - ${descricaoFalha}`, valorDiferenca: difNum }
+        });
+      });
+
+      const recibo = {
+        id: vendaCriadaId.substring(0, 8).toUpperCase(),
+        dataHora: new Date().toLocaleString("pt-BR"),
+        itens: [{ ...itemRef, tamanhoSelecionado: tamanhoFalhaDevolvido }],
+        subtotalBruto: Number(valorDiferencaFalha) || 0,
+        desconto: 0,
+        total: Number(valorDiferencaFalha) || 0,
+        formaPagamento: "Troca por Falha",
+        tipoVenda: "troca"
+      };
+
+      setDadosRecibo(recibo);
+      setDadosReciboLocal(recibo);
+      alert("Peça com falha registrada, enviada ao painel de falhas e estoque descontado!");
+      setModalTipoTrocaAberto(false);
+      setModalTrocaFalhaAberto(false);
+      setDescricaoFalha("");
+      setTamanhoFalhaDevolvido("");
+      setValorDiferencaFalha("0.00");
+      setCarrinho([]);
+      setEtapaTeclado("busca");
+      await recarregarDados();
+
+      setTimeout(() => { window.print(); }, 300);
+    } catch (err) {
+      alert("Erro ao registrar falha: " + err.message);
+    } finally {
+      setProcessandoVenda(false);
+    }
   }
 
   async function confirmarAVerEProsseguir(e) {
@@ -512,7 +795,10 @@ export default function Pdv({
   }
 
   function confirmarDescontoTeclado(e) {
-    if (e) e.preventDefault();
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     const val = parseFloat(valorDescontoInput);
     if (!isNaN(val) && val > 0) {
       setDescontoAplicado({
@@ -524,13 +810,17 @@ export default function Pdv({
     setModalDescontoAberto(false);
     setIndiceFormaPagto(0);
     setModalFormaPagtoAberto(true);
+    setEtapaTeclado("pagamento");
   }
 
   const valorEntregueNum = parseFloat(valorEntregueInput) || 0;
   const trocoCalculado = Math.max(0, valorEntregueNum - subtotalComDesconto);
 
   function confirmarDinheiroTeclado(e) {
-    if (e) e.preventDefault();
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     if (valorEntregueNum < subtotalComDesconto) {
       alert(`Valor insuficiente! O total da venda é R$ ${subtotalComDesconto.toFixed(2)}.`);
       return;
@@ -538,6 +828,7 @@ export default function Pdv({
 
     const infoDinheiro = { valorEntregue: valorEntregueNum, troco: trocoCalculado };
     setModalDinheiroAberto(false);
+    setEtapaTeclado("busca");
     executarVendaNoBanco(subtotalComDesconto, "Dinheiro", null, infoDinheiro);
   }
 
@@ -549,7 +840,8 @@ export default function Pdv({
       const nomeLimpo = nomeResponsavelAVer.trim().toLowerCase();
       const isJarbasOuLucas = nomeLimpo === "jarbas" || nomeLimpo === "lucas" || nomeLimpo.includes("jarbas") || nomeLimpo.includes("lucas");
 
-      const obsTexto = `Responsável: ${nomeResponsavelAVer.trim()} | Data: ${dataAVer} | Valor: R$ ${subtotalBruto.toFixed(2)} ${observacaoAVer ? `| Obs: ${observacaoAVer.trim()}` : ""}`;
+      const valorFinalRegistro = isJarbasOuLucas ? 0 : subtotalBruto;
+      const obsTexto = `Responsável: ${nomeResponsavelAVer.trim()} | Data: ${dataAVer} | Valor: R$ ${valorFinalRegistro.toFixed(2)} ${observacaoAVer ? `| Obs: ${observacaoAVer.trim()}` : ""}`;
 
       await runTransaction(db, async (transaction) => {
         const leituras = [];
@@ -592,19 +884,19 @@ export default function Pdv({
           tipoVenda: "a_ver",
           operadorEmail: usuarioLogado?.email || "operador",
           lojaId: lojaIdAtual,
-          naoComputarNoCaixa: isJarbasOuLucas,
+          naoComputarNoCaixa: true,
           itens: carrinho.map((item) => ({
             id: item.id,
             nome: item.nome,
             referencia: item.referencia,
             codigoBarras: item.codigoBarras,
             tamanhoSelecionado: item.tamanhoSelecionado || "",
-            precoUnitario: item.precoUnitario,
+            precoUnitario: isJarbasOuLucas ? 0 : item.precoUnitario,
             quantidade: item.quantidade,
           })),
-          subtotalBruto: subtotalBruto,
+          subtotalBruto: valorFinalRegistro,
           desconto: 0,
-          total: subtotalBruto, // Salva o valor real para o relatório constar o montante
+          total: valorFinalRegistro,
           formaPagamento: "A Ver",
           infoTroca: { itemTrocado: obsTexto, valorDiferenca: 0, levouAlgoMais: "" }
         });
@@ -616,18 +908,19 @@ export default function Pdv({
           tipo: "mercadoria_a_ver",
           status: "pendente_prova",
           isJarbasOuLucas,
-          valorTotalMercadoria: subtotalBruto,
+          valorTotalMercadoria: valorFinalRegistro,
           dataRetirada: dataAVer,
           itensDescricao: carrinho.map(i => `${i.quantidade}x ${i.nome} ${i.tamanhoSelecionado ? `(${i.tamanhoSelecionado})` : ""}`).join("; "),
           observacao: observacaoAVer.trim(),
-          itens: carrinho,
+          itens: carrinho.map(i => ({ ...i, precoUnitario: isJarbasOuLucas ? 0 : i.precoUnitario })),
           data: serverTimestamp()
         });
       });
 
-      alert(isJarbasOuLucas ? "Retirada registrada para Jarbas/Lucas (Isolado do caixa)!" : "Mercadoria a ver registrada com sucesso (Valor consta no relatório)!");
+      alert(isJarbasOuLucas ? "Retirada registrada para Jarbas/Lucas (Isento/Isolado)!" : "Mercadoria a ver registrada com sucesso (Valor devido computado)!");
       setCarrinho([]);
       setDescontoAplicado({ tipo: "reais", valor: 0, totalDescontado: 0 });
+      setEtapaTeclado("busca");
       await recarregarDados();
     } catch (err) {
       alert("Erro ao registrar mercadoria a ver: " + err.message);
@@ -730,8 +1023,10 @@ export default function Pdv({
       };
 
       setDadosRecibo(recibo);
+      setDadosReciboLocal(recibo);
       setCarrinho([]);
       setDescontoAplicado({ tipo: "reais", valor: 0, totalDescontado: 0 });
+      setEtapaTeclado("busca");
       await recarregarDados();
 
       setTimeout(() => {
@@ -769,6 +1064,10 @@ export default function Pdv({
       })
     : [];
 
+  const produtosTrocaFiltrados = buscaTrocaProduto.trim().length > 0
+    ? produtos.filter(p => p.nome.toLowerCase().includes(buscaTrocaProduto.trim().toLowerCase()) || (p.referencia && p.referencia.toLowerCase().includes(buscaTrocaProduto.trim().toLowerCase())))
+    : [];
+
   useEffect(() => {
     setIndiceFocoBusca(0);
   }, [buscaPdv]);
@@ -785,13 +1084,17 @@ export default function Pdv({
   function handleKeyDownBusca(e) {
     if (e.key === "Enter") {
       e.preventDefault();
+      e.stopPropagation();
       if (termo.length === 0) {
         iniciarFluxoFechamentoTeclado();
         return;
       }
       if (produtosFiltrados.length > 0) {
         const itemEscolhido = produtosFiltrados[indiceFocoBusca] || produtosFiltrados[0];
-        if (itemEscolhido) abrirModalQtd(itemEscolhido);
+        if (itemEscolhido) {
+          abrirModalQtd(itemEscolhido);
+          setEtapaTeclado("adicionarItem");
+        }
       }
     } else if (e.key === "ArrowDown" && produtosFiltrados.length > 0) {
       e.preventDefault();
@@ -818,19 +1121,26 @@ export default function Pdv({
     <>
       <style>{`
         @media print {
+          @page {
+            size: 80mm auto;
+            margin: 0mm;
+          }
           body * { visibility: hidden !important; }
           .print-recibo, .print-recibo * { visibility: visible !important; }
           .print-recibo { 
             display: block !important; 
-            position: absolute; 
-            left: 0; 
-            top: 0; 
+            position: absolute !important; 
+            left: 0 !important; 
+            top: 0 !important; 
             width: 80mm !important; 
             background: #fff !important; 
             color: #000 !important; 
             font-family: 'Courier New', Courier, monospace !important; 
-            font-size: 11px !important;
-            padding: 4mm !important;
+            font-size: 13px !important;
+            font-weight: bold !important;
+            padding: 2mm !important;
+            margin: 0 !important;
+            box-sizing: border-box !important;
           }
         }
         @media screen {
@@ -841,25 +1151,36 @@ export default function Pdv({
           box-shadow: 0 0 10px rgba(40, 167, 69, 0.25);
           background: rgba(40, 167, 69, 0.03);
         }
+        .btn-hover-troca:hover {
+          background: ${cores.bgCardSecundario || "#f0f0f0"} !important;
+          border-color: ${corModo} !important;
+        }
       `}</style>
 
-      {/* RECIBO TÉRMICO 80mm */}
+      {/* RECIBO TÉRMICO 80mm INTEGRADO COM CONFIGURAÇÕES DA LOJA */}
       {dadosReciboLocal && (
         <div className="print-recibo">
           <div style={{ textAlign: "center", marginBottom: "8px" }}>
-            <h2 style={{ margin: 0, fontSize: "14px", fontWeight: "bold" }}>LIFE SURF</h2>
-            <p style={{ margin: "2px 0", fontSize: "10px" }}>COMPROVANTE DE VENDA</p>
-            <p style={{ margin: "2px 0", fontSize: "9px" }}>Pedido: #{dadosReciboLocal.id}</p>
-            <p style={{ margin: "2px 0", fontSize: "9px" }}>{dadosReciboLocal.dataHora}</p>
+            {configLoja.logoUrl && (
+              <div style={{ marginBottom: "5px" }}>
+                <img src={configLoja.logoUrl} alt="Logo" style={{ maxHeight: "40px", maxWidth: "120px", objectFit: "contain", margin: "0 auto" }} />
+              </div>
+            )}
+            <h2 style={{ margin: 0, fontSize: "16px", fontWeight: "bold" }}>{configLoja.nomeLoja}</h2>
+            {configLoja.endereco && <p style={{ margin: "2px 0", fontSize: "10px" }}>{configLoja.endereco}</p>}
+            {configLoja.telefone && <p style={{ margin: "2px 0", fontSize: "10px" }}>Tel: {configLoja.telefone}</p>}
+            <p style={{ margin: "4px 0 2px 0", fontSize: "11px" }}>COMPROVANTE DE VENDA</p>
+            <p style={{ margin: "2px 0", fontSize: "10px" }}>Pedido: #{dadosReciboLocal.id}</p>
+            <p style={{ margin: "2px 0", fontSize: "10px" }}>{dadosReciboLocal.dataHora}</p>
           </div>
-          <div style={{ borderBottom: "1px dashed #000", margin: "6px 0" }}></div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "10px" }}>
+          <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "11px" }}>
             <span>ITEM / TAM / QTD x VL.UN</span>
             <span>TOTAL</span>
           </div>
-          <div style={{ borderBottom: "1px dashed #000", margin: "4px 0 6px 0" }}></div>
+          <div style={{ borderBottom: "1px solid #000", margin: "4px 0 6px 0" }}></div>
           {dadosReciboLocal.itens.map((item, i) => (
-            <div key={i} style={{ marginBottom: "6px", fontSize: "10px" }}>
+            <div key={i} style={{ marginBottom: "6px", fontSize: "11px" }}>
               <div>{item.nome} {item.tamanhoSelecionado ? `[Tam: ${item.tamanhoSelecionado}]` : ""}</div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span>{item.quantidade}x R$ {Number(item.precoUnitario).toFixed(2)}</span>
@@ -868,33 +1189,33 @@ export default function Pdv({
             </div>
           ))}
           {dadosReciboLocal.infoTroca && (
-            <div style={{ fontSize: "9px", marginTop: "4px", borderTop: "1px dotted #000", paddingTop: "4px" }}>
+            <div style={{ fontSize: "10px", marginTop: "4px", borderTop: "1px solid #000", paddingTop: "4px" }}>
               <strong>Obs/Troca:</strong> {dadosReciboLocal.infoTroca.itemTrocado}
             </div>
           )}
-          <div style={{ borderBottom: "1px dashed #000", margin: "6px 0" }}></div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px" }}>
+          <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px" }}>
             <span>Subtotal:</span>
             <span>R$ {dadosReciboLocal.subtotalBruto.toFixed(2)}</span>
           </div>
           {dadosReciboLocal.desconto > 0 && (
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px" }}>
               <span>Desconto:</span>
               <span>- R$ {dadosReciboLocal.desconto.toFixed(2)}</span>
             </div>
           )}
-          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "12px", marginTop: "4px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "13px", marginTop: "4px" }}>
             <span>TOTAL PAGO:</span>
             <span>R$ {dadosReciboLocal.total.toFixed(2)}</span>
           </div>
-          <div style={{ borderBottom: "1px dashed #000", margin: "6px 0" }}></div>
-          <div style={{ textAlign: "center", fontSize: "10px" }}>
+          <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
+          <div style={{ textAlign: "center", fontSize: "11px" }}>
             <p style={{ margin: "2px 0" }}>Forma: {dadosReciboLocal.formaPagamento}</p>
             <p style={{ margin: "2px 0" }}>Modo: {dadosReciboLocal.tipoVenda.toUpperCase()}</p>
           </div>
-          <div style={{ borderBottom: "1px dashed #000", margin: "6px 0" }}></div>
-          <div style={{ textAlign: "center", fontSize: "9px", marginTop: "8px" }}>
-            OBRIGADO PELA PREFERÊNCIA! VOLTE SEMPRE!
+          <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
+          <div style={{ textAlign: "center", fontSize: "10px", marginTop: "8px" }}>
+            {configLoja.mensagemRodape}
           </div>
         </div>
       )}
@@ -902,13 +1223,13 @@ export default function Pdv({
       {modalAtalhosAberto && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
           <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "420px", border: `1px solid ${cores.borda}` }}>
-            <h3 style={{ margin: "0 0 15px 0" }}>⌨️ Atalhos do Sistema PDV</h3>
+            <h3 style={{ margin: "0 0 15px 0", color: cores.texto }}>⌨️ Atalhos do Sistema PDV</h3>
             <ul style={{ paddingLeft: "20px", color: cores.textoSecundario, lineHeight: "1.8", margin: "0 0 20px 0", fontSize: "13px" }}>
               <li><strong>Teclas 1, 2, 3, 4 (com busca vazia):</strong> Alternam entre Varejo, Atacado, Troca e Mercadoria a Ver.</li>
               <li><strong>Setas ← / → (com busca vazia):</strong> Alternam os modos de venda.</li>
               <li><strong>Enter (com busca vazia):</strong> Inicia o fechamento da venda ou preenchimento especial.</li>
               <li><strong>Setas (↑ ↓):</strong> Navegam pelos produtos na busca com rolagem automática.</li>
-              <li><strong>Tecla Shift (com busca vazia):</strong> Gerencia os tamanhos do último item do carrinho.</li>
+              <li><strong>Tecla F2 (com busca vazia):</strong> Gerencia os tamanhos do último item do carrinho.</li>
               <li><strong>Tecla Q (com busca vazia):</strong> Altera o preço do último item do carrinho.</li>
               <li><strong>F1:</strong> Abre / fecha este painel de ajuda.</li>
             </ul>
@@ -919,11 +1240,11 @@ export default function Pdv({
         </div>
       )}
 
-      {/* MODAL DE SELEÇÃO DE TAMANHO COM SHIFT */}
+      {/* MODAL DE SELEÇÃO DE TAMANHO COM F2 */}
       {modalTamanhoCarrinhoAberto && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999, padding: "15px", boxSizing: "border-box" }}>
           <div style={{ background: cores.bgCard, padding: "20px", borderRadius: "10px", width: "100%", maxWidth: "420px", border: `1px solid ${cores.borda}` }}>
-            <h3 style={{ margin: "0 0 10px 0", fontSize: "16px" }}>👕 Gerenciar Tamanhos da Peça</h3>
+            <h3 style={{ margin: "0 0 10px 0", fontSize: "16px", color: cores.texto }}>👕 Gerenciar Tamanhos da Peça</h3>
             <p style={{ fontSize: "12px", color: cores.textoSecundario, marginBottom: "15px" }}>
               Item: <strong>{carrinho[itemSelecionadoCarrinhoIdx]?.nome}</strong>
             </p>
@@ -978,7 +1299,7 @@ export default function Pdv({
               </div>
             ) : (
               <form onSubmit={confirmarQtdTamanhoModal}>
-                <div style={{ background: cores.bgCardSecundario, padding: "10px", borderRadius: "6px", marginBottom: "12px", fontSize: "13px" }}>
+                <div style={{ background: cores.bgCardSecundario, padding: "10px", borderRadius: "6px", marginBottom: "12px", fontSize: "13px", color: cores.texto }}>
                   Tamanho selecionado: <strong style={{ color: corModo }}>{tamanhoSelecionadoTemp}</strong> (Disp: {tamanhosDisponiveisTemp[tamanhoSelecionadoTemp]} un)
                 </div>
                 <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "6px" }}>Quantidade (Apenas números):</label>
@@ -1002,58 +1323,230 @@ export default function Pdv({
         </div>
       )}
 
-      {modalTrocaInfoAberto && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
-          <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "400px", border: `1px solid ${cores.borda}` }}>
-            <h3 style={{ margin: "0 0 10px 0" }}>🔄 Informações da Troca</h3>
-            <p style={{ color: cores.textoSecundario, fontSize: "13px", margin: "0 0 15px 0" }}>Preencha os dados da troca. Pressione Enter para avançar.</p>
+      {/* MODAL 1: SELEÇÃO DO TIPO DE TROCA */}
+      {modalTipoTrocaAberto && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999, padding: "15px" }}>
+          <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "10px", width: "100%", maxWidth: "420px", border: `1px solid ${cores.borda}`, boxShadow: "0 8px 30px rgba(0,0,0,0.5)" }}>
+            <h3 style={{ margin: "0 0 6px 0", fontSize: "18px", color: cores.texto }}>🔄 Selecione o Procedimento de Troca</h3>
+            <p style={{ color: cores.textoSecundario, fontSize: "13px", marginBottom: "15px" }}>Item no carrinho: <strong>{carrinho[0]?.nome}</strong></p>
+            <p style={{ color: cores.textoSuave, fontSize: "11px", marginBottom: "15px" }}>Navegue com [↑ / ↓] e confirme com [Enter]</p>
+            
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px" }}>
+              {[
+                { label: "Troca por Tamanho (Mesmo Produto)", acao: 0 },
+                { label: "Troca por Outro Produto", acao: 1 },
+                { label: "Troca por Falha / Defeito", acao: 2 }
+              ].map((opt, idx) => {
+                const focado = indiceTrocaTipo === idx;
+                return (
+                  <div
+                    key={idx}
+                    onClick={() => {
+                      setIndiceTrocaTipo(idx);
+                      if (idx === 0) {
+                        setModalTipoTrocaAberto(false);
+                        const item = carrinho[0];
+                        const prodReal = produtos.find(p => p.id === item.id);
+                        const prateleira = prodReal ? parseTamanhos(prodReal.tamanhos) : parseTamanhos(item.tamanhosDisponiveis);
+                        setTamanhosDisponiveisDevolucao(prateleira);
+                        setTamanhosDisponiveisNovo(prateleira);
+                        setTamanhoDevolvidoTroca("");
+                        setTamanhoNovoTroca("");
+                        setTipoPrecoTrocaTamanho(tipoTabela);
+                        setModalTrocaTamanhoAberto(true);
+                      } else if (idx === 1) {
+                        setModalTipoTrocaAberto(false);
+                        setBuscaTrocaProduto("");
+                        setProdutoSubstitutoTroca(null);
+                        setTamanhoSubstitutoTroca("");
+                        setTamanhosSubstitutosDisponiveis({});
+                        setTipoPrecoOutroProd(tipoTabela);
+                        setModalTrocaOutroProdutoAberto(true);
+                      } else if (idx === 2) {
+                        setModalTipoTrocaAberto(false);
+                        setDescricaoFalha("");
+                        setTamanhoFalhaDevolvido(carrinho[0]?.tamanhoSelecionado || "");
+                        setValorDiferencaFalha("0.00");
+                        setModalTrocaFalhaAberto(true);
+                      }
+                    }}
+                    style={{
+                      padding: "14px 16px",
+                      borderRadius: "8px",
+                      border: focado ? `2px solid ${corModo}` : `1px solid ${cores.borda}`,
+                      background: focado ? (cores.itemAtivoBg || "rgba(0,123,255,0.15)") : cores.bgCardSecundario,
+                      color: cores.texto,
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between"
+                    }}
+                  >
+                    <span>{opt.label}</span>
+                    {focado && <span style={{ fontSize: "11px", background: corModo, color: "#fff", padding: "2px 6px", borderRadius: "3px" }}>Enter ↵</span>}
+                  </div>
+                );
+              })}
+            </div>
 
-            <form onSubmit={confirmarTrocaEProsseguir}>
+            <button onClick={() => setModalTipoTrocaAberto(false)} style={{ width: "100%", padding: "11px", background: cores.bgCardSecundario, color: cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "8px", cursor: "pointer", fontWeight: "bold", fontSize: "13px" }}>
+              Cancelar (Esc)
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: TROCA POR TAMANHO */}
+      {modalTrocaTamanhoAberto && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999, padding: "15px" }}>
+          <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "10px", width: "100%", maxWidth: "420px", border: `1px solid ${cores.borda}`, maxHeight: "90vh", overflowY: "auto" }}>
+            <h3 style={{ margin: "0 0 10px 0", fontSize: "16px", color: cores.texto }}>👕 Troca por Tamanho</h3>
+            <p style={{ fontSize: "12px", color: cores.textoSecundario, marginBottom: "15px" }}>Item: <strong>{carrinho[0]?.nome}</strong></p>
+
+            <div style={{ marginBottom: "12px" }}>
+              <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Tamanho Devolvido pelo Cliente (Entra no estoque):</label>
+              <select value={tamanhoDevolvidoTroca} onChange={e => setTamanhoDevolvidoTroca(e.target.value)} style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }}>
+                <option value="">Selecione...</option>
+                {Object.keys(tamanhosDisponiveisDevolucao).map(t => (
+                  <option key={t} value={t} style={{ background: cores.bgGeral, color: cores.texto }}>{t}</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ marginBottom: "12px" }}>
+              <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Novo Tamanho Retirado (Sai do estoque):</label>
+              <select value={tamanhoNovoTroca} onChange={e => setTamanhoNovoTroca(e.target.value)} style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }}>
+                <option value="">Selecione...</option>
+                {Object.keys(tamanhosDisponiveisNovo).map(t => {
+                  const disp = tamanhosDisponiveisNovo[t];
+                  return (
+                    <option key={t} value={t} disabled={disp <= 0} style={{ background: cores.bgGeral, color: disp > 0 ? cores.texto : "#888" }}>
+                      {t} (Disponível: {disp} un)
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            <div style={{ marginBottom: "20px" }}>
+              <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Tabela de Preço:</label>
+              <select value={tipoPrecoTrocaTamanho} onChange={e => setTipoPrecoTrocaTamanho(e.target.value)} style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }}>
+                <option value="varejo" style={{ background: cores.bgGeral, color: cores.texto }}>Varejo</option>
+                <option value="atacado" style={{ background: cores.bgGeral, color: cores.texto }}>Atacado</option>
+              </select>
+            </div>
+
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button onClick={() => setModalTrocaTamanhoAberto(false)} style={{ flex: 1, padding: "10px", background: cores.bgCardSecundario, color: cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "6px", cursor: "pointer" }}>Voltar</button>
+              <button onClick={concluirTrocaPorTamanho} disabled={processandoVenda} style={{ flex: 1, padding: "10px", background: "#28a745", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}>{processandoVenda ? "Processando..." : "Confirmar Troca"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: TROCA POR OUTRO PRODUTO */}
+      {modalTrocaOutroProdutoAberto && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999, padding: "15px" }}>
+          <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "10px", width: "100%", maxWidth: "450px", border: `1px solid ${cores.borda}`, maxHeight: "90vh", overflowY: "auto" }}>
+            <h3 style={{ margin: "0 0 10px 0", fontSize: "16px", color: cores.texto }}>🔄 Troca por Outro Produto</h3>
+            <p style={{ fontSize: "12px", color: cores.textoSecundario, marginBottom: "15px" }}>Item devolvido: <strong>{carrinho[0]?.nome}</strong></p>
+
+            <form onSubmit={confirmarTrocaOutroProduto}>
               <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>O que foi trocado?</label>
-                <input
-                  ref={inputTroca1Ref}
-                  type="text"
-                  placeholder=""
-                  value={itemTrocadoInput}
-                  onChange={(e) => setItemTrocadoInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); inputTroca2Ref.current?.focus(); } }}
-                  style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }}
-                  required
-                />
+                <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Buscar Novo Produto no Estoque:</label>
+                <input type="text" placeholder="Digite o nome ou referência..." value={buscaTrocaProduto} onChange={e => setBuscaTrocaProduto(e.target.value)} style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }} />
               </div>
+
+              {buscaTrocaProduto.trim().length > 0 && (
+                <div style={{ maxHeight: "140px", overflowY: "auto", border: `1px solid ${cores.borda}`, borderRadius: "6px", marginBottom: "12px" }}>
+                  {produtosTrocaFiltrados.length === 0 ? (
+                    <p style={{ padding: "8px", fontSize: "12px", color: cores.textoSecundario }}>Nenhum produto encontrado.</p>
+                  ) : (
+                    produtosTrocaFiltrados.map(p => (
+                      <div key={p.id} onClick={() => { 
+                        setProdutoSubstitutoTroca(p); 
+                        setTamanhosSubstitutosDisponiveis(parseTamanhos(p.tamanhos));
+                        setTamanhoSubstitutoTroca("");
+                        setBuscaTrocaProduto(""); 
+                      }} style={{ padding: "8px 12px", borderBottom: `1px solid ${cores.bordaClara}`, cursor: "pointer", background: produtoSubstitutoTroca?.id === p.id ? cores.itemAtivoBg : "transparent", color: cores.texto }}>
+                        <strong>{p.nome}</strong> - R$ {Number(p.precoVarejo || p.preco || 0).toFixed(2)} (Estoque: {p.estoque} un)
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {produtoSubstitutoTroca && (
+                <div style={{ background: cores.bgCardSecundario, padding: "10px", borderRadius: "6px", marginBottom: "12px", fontSize: "13px", color: cores.texto }}>
+                  Selecionado: <strong>{produtoSubstitutoTroca.nome}</strong> (Estoque Total: {produtoSubstitutoTroca.estoque} un)
+                </div>
+              )}
 
               <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Valor de Diferença (R$):</label>
-                <input
-                  ref={inputTroca2Ref}
-                  type="number"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={valorDiferencaInput}
-                  onChange={(e) => setValorDiferencaInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); inputTroca3Ref.current?.focus(); } }}
-                  style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }}
-                />
+                <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Tamanho do Novo Produto:</label>
+                <select value={tamanhoSubstitutoTroca} onChange={e => setTamanhoSubstitutoTroca(e.target.value)} style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }} required>
+                  <option value="">Selecione o tamanho...</option>
+                  {Object.keys(tamanhosSubstitutosDisponiveis).map(t => {
+                    const disp = tamanhosSubstitutosDisponiveis[t];
+                    return (
+                      <option key={t} value={t} disabled={disp <= 0} style={{ background: cores.bgGeral, color: disp > 0 ? cores.texto : "#888" }}>
+                        {t} (Disponível: {disp} un)
+                      </option>
+                    );
+                  })}
+                </select>
               </div>
 
-              <div style={{ marginBottom: "15px" }}>
-                <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Levou algo mais?</label>
-                <input
-                  ref={inputTroca3Ref}
-                  type="text"
-                  placeholder=""
-                  value={levouAlgoMaisInput}
-                  onChange={(e) => setLevouAlgoMaisInput(e.target.value)}
-                  style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }}
-                />
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Tabela de Preço:</label>
+                <select value={tipoPrecoOutroProd} onChange={e => setTipoPrecoOutroProd(e.target.value)} style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }}>
+                  <option value="varejo" style={{ background: cores.bgGeral, color: cores.texto }}>Varejo</option>
+                  <option value="atacado" style={{ background: cores.bgGeral, color: cores.texto }}>Atacado</option>
+                </select>
               </div>
 
-              <div style={{ display: "flex", gap: "10px" }}>
-                <button type="button" onClick={() => setModalTrocaInfoAberto(false)} style={{ flex: 1, padding: "10px", background: cores.bgCardSecundario, color: cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "4px", cursor: "pointer" }}>Cancelar</button>
-                <button type="submit" style={{ flex: 1, padding: "10px", background: "#e67e22", color: "#fff", border: "none", borderRadius: "4px", fontWeight: "bold", cursor: "pointer" }}>Continuar (Enter)</button>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button type="button" onClick={() => setModalTrocaOutroProdutoAberto(false)} style={{ flex: 1, padding: "10px", background: cores.bgCardSecundario, color: cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "6px", cursor: "pointer" }}>Voltar</button>
+                <button type="submit" style={{ flex: 1, padding: "10px", background: "#e67e22", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}>Avançar para Pagamento</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: TROCA POR FALHA / DEFEITO */}
+      {modalTrocaFalhaAberto && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999, padding: "15px" }}>
+          <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "10px", width: "100%", maxWidth: "420px", border: `1px solid ${cores.borda}`, maxHeight: "90vh", overflowY: "auto" }}>
+            <h3 style={{ margin: "0 0 10px 0", fontSize: "16px", color: cores.texto }}>⚠️ Registrar Troca por Falha / Defeito</h3>
+            <p style={{ fontSize: "12px", color: cores.textoSecundario, marginBottom: "15px" }}>A peça danificada será descontada do estoque e enviada ao painel de Peças com Falha.</p>
+
+            <div style={{ marginBottom: "12px" }}>
+              <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Peça Trocada:</label>
+              <input type="text" value={carrinho[0]?.nome || ""} readOnly style={{ width: "100%", padding: "10px", background: cores.bgCardSecundario, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box", fontWeight: "bold" }} />
+            </div>
+
+            <div style={{ marginBottom: "12px" }}>
+              <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Tamanho da Peça:</label>
+              <input type="text" placeholder="Ex: M ou 42" value={tamanhoFalhaDevolvido} onChange={e => setTamanhoFalhaDevolvido(e.target.value)} style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }} required />
+            </div>
+
+            <div style={{ marginBottom: "12px" }}>
+              <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Valor de Diferença (Se houver R$):</label>
+              <input type="number" step="0.01" value={valorDiferencaFalha} onChange={e => setValorDiferencaFalha(e.target.value)} style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }} />
+            </div>
+
+            <div style={{ marginBottom: "20px" }}>
+              <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Descrição da Falha / Defeito:</label>
+              <textarea placeholder="Ex: Tecido rasgado, zíper travado..." value={descricaoFalha} onChange={e => setDescricaoFalha(e.target.value)} style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", height: "80px", boxSizing: "border-box", resize: "vertical" }} required />
+            </div>
+
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button onClick={() => setModalTrocaFalhaAberto(false)} style={{ flex: 1, padding: "10px", background: cores.bgCardSecundario, color: cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "6px", cursor: "pointer" }}>Voltar</button>
+              <button onClick={concluirTrocaPorFalha} disabled={processandoVenda} style={{ flex: 1, padding: "10px", background: "#e53e3e", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}>{processandoVenda ? "Processando..." : "Registrar Falha"}</button>
+            </div>
           </div>
         </div>
       )}
@@ -1061,7 +1554,7 @@ export default function Pdv({
       {modalAVerInfoAberto && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
           <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "400px", border: `1px solid ${cores.borda}` }}>
-            <h3 style={{ margin: "0 0 10px 0" }}>🛍️ Mercadoria a Ver / Prova</h3>
+            <h3 style={{ margin: "0 0 10px 0", color: cores.texto }}>🛍️ Mercadoria a Ver / Prova</h3>
             <p style={{ color: cores.textoSecundario, fontSize: "13px", margin: "0 0 15px 0" }}>Atualiza o estoque, exibe o valor no relatório e registra o pedido.</p>
 
             <form onSubmit={confirmarAVerEProsseguir}>
@@ -1100,12 +1593,44 @@ export default function Pdv({
         </div>
       )}
 
+      {produtoModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
+          <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "340px", border: `1px solid ${cores.borda}` }}>
+            <h3 style={{ margin: "0 0 10px 0", fontSize: "18px", color: cores.texto }}>Adicionar Item</h3>
+            <p style={{ color: cores.textoSecundario, fontSize: "14px", margin: "0 0 15px 0" }}>
+              <strong style={{ color: cores.texto }}>{produtoModal.nome}</strong><br />
+              <span style={{ color: corModo, fontWeight: "bold" }}>
+                R$ {tipoTabela === "a_ver" ? "0.00 (A Ver)" : `${getPrecoAtual(produtoModal).toFixed(2)} (${tipoTabela.toUpperCase()})`}
+              </span> | Estoque: {produtoModal.estoque} un {produtoModal.permiteNegativo ? "(Sem trava)" : ""}
+            </p>
+
+            <form onSubmit={confirmarAdicaoModal}>
+              <label style={{ display: "block", fontSize: "13px", marginBottom: "6px", color: cores.textoSecundario }}>Quantidade:</label>
+              <input
+                ref={inputQtdRef}
+                type="number"
+                min="1"
+                max={produtoModal.permiteNegativo ? undefined : produtoModal.estoque}
+                value={qtdInput}
+                onChange={(e) => setQtdInput(e.target.value)}
+                style={{ width: "100%", padding: "12px", fontSize: "22px", fontWeight: "bold", textAlign: "center", background: cores.inputBg, border: `1px solid ${cores.bordaClara}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box", marginBottom: "15px" }}
+              />
+
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button type="button" onClick={() => setProdutoModal(null)} style={{ flex: 1, padding: "10px", background: cores.bgCardSecundario, color: cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "4px", cursor: "pointer" }}>Cancelar</button>
+                <button type="submit" style={{ flex: 1, padding: "10px", background: corModo, color: "#fff", border: "none", borderRadius: "4px", fontWeight: "bold", cursor: "pointer" }}>Confirmar (Enter)</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {itemEditandoPreco && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
           <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "340px", border: `1px solid ${cores.borda}` }}>
-            <h3 style={{ margin: "0 0 10px 0", fontSize: "18px" }}>✏️ Alterar Preço Unitário</h3>
+            <h3 style={{ margin: "0 0 10px 0", fontSize: "18px", color: cores.texto }}>✏️ Alterar Preço Unitário</h3>
             <p style={{ color: cores.textoSecundario, fontSize: "14px", margin: "0 0 15px 0" }}>
-              Item: <strong>{itemEditandoPreco.nome}</strong>
+              Item: <strong style={{ color: cores.texto }}>{itemEditandoPreco.nome}</strong>
             </p>
 
             <form onSubmit={salvarPrecoItemModal}>
@@ -1131,7 +1656,7 @@ export default function Pdv({
       {modalDescontoAberto && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
           <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "360px", border: `1px solid ${cores.borda}`, boxShadow: "0 6px 25px rgba(0,0,0,0.7)" }}>
-            <h3 style={{ margin: "0 0 10px 0" }}>🎟️ Desconto na Venda</h3>
+            <h3 style={{ margin: "0 0 10px 0", color: cores.texto }}>🎟️ Desconto na Venda</h3>
             <p style={{ color: cores.textoSecundario, fontSize: "13px", margin: "0 0 12px 0" }}>
               Subtotal: <strong>R$ {subtotalBruto.toFixed(2)}</strong> <br />
               <span style={{ color: cores.textoSuave }}>Use [← / →] para alternar tipo | [Enter] avança</span>
@@ -1177,7 +1702,7 @@ export default function Pdv({
       {modalFormaPagtoAberto && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
           <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "360px", border: `1px solid ${cores.borda}`, boxShadow: "0 6px 25px rgba(0,0,0,0.7)" }}>
-            <h3 style={{ margin: "0 0 10px 0" }}>💳 Escolha a Forma de Pagamento</h3>
+            <h3 style={{ margin: "0 0 10px 0", color: cores.texto }}>💳 Escolha a Forma de Pagamento</h3>
             <p style={{ color: cores.textoSecundario, fontSize: "13px", margin: "0 0 15px 0" }}>
               Total a pagar: <strong style={{ color: corModo, fontSize: "16px" }}>R$ {(tipoTabela === "troca" ? Math.max(0, subtotalComDesconto + (Number(valorDiferencaInput) || 0)) : subtotalComDesconto).toFixed(2)}</strong> <br />
               <span style={{ color: cores.textoSuave }}>Navegue com [↑ / ↓] e confirme com [Enter]</span>
@@ -1192,11 +1717,7 @@ export default function Pdv({
                     onClick={() => {
                       setIndiceFormaPagto(idx);
                       setModalFormaPagtoAberto(false);
-                      if (fp === "Troca") {
-                        const diferencaNum = Number(valorDiferencaInput) || 0;
-                        const valorFinalTroca = Math.max(0, subtotalComDesconto + diferencaNum);
-                        executarVendaNoBanco(valorFinalTroca, "Troca", null, null);
-                      } else if (fp === "Cartão de Crédito") {
+                      if (fp === "Cartão de Crédito") {
                         setIndiceParcela(0);
                         setModalCartaoAberto(true);
                       } else if (fp === "Dinheiro") {
@@ -1217,7 +1738,7 @@ export default function Pdv({
                       alignItems: "center"
                     }}
                   >
-                    <strong style={{ fontSize: "16px" }}>{fp}</strong>
+                    <strong style={{ fontSize: "16px", color: cores.texto }}>{fp}</strong>
                     {focado && <span style={{ fontSize: "11px", background: corModo, color: "#fff", padding: "2px 6px", borderRadius: "3px" }}>Enter ↵</span>}
                   </div>
                 );
@@ -1238,7 +1759,7 @@ export default function Pdv({
       {modalCartaoAberto && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
           <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "380px", border: `1px solid ${cores.borda}`, boxShadow: "0 6px 25px rgba(0,0,0,0.7)" }}>
-            <h3 style={{ margin: "0 0 8px 0", fontSize: "18px" }}>💳 Parcelamento Cartão de Crédito</h3>
+            <h3 style={{ margin: "0 0 8px 0", fontSize: "18px", color: cores.texto }}>💳 Parcelamento Cartão de Crédito</h3>
             <p style={{ color: cores.textoSecundario, fontSize: "13px", margin: "0 0 15px 0" }}>
               Total base: <strong>R$ {subtotalComDesconto.toFixed(2)}</strong> <br />
               <span style={{ color: cores.textoSuave }}>Navegue com [↑ / ↓] e confirme com [Enter]</span>
@@ -1267,7 +1788,7 @@ export default function Pdv({
                     }}
                   >
                     <div>
-                      <strong>{conf.label}</strong>
+                      <strong style={{ color: cores.texto }}>{conf.label}</strong>
                       <div style={{ fontSize: "12px", color: cores.textoSecundario }}>{num}x de R$ {valorParc.toFixed(2)}</div>
                     </div>
                     <div style={{ fontSize: "14px", fontWeight: "bold", color: "#28a745" }}>
@@ -1295,10 +1816,10 @@ export default function Pdv({
       {modalDinheiroAberto && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
           <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "360px", border: `1px solid ${cores.borda}`, boxShadow: "0 6px 25px rgba(0,0,0,0.7)" }}>
-            <h3 style={{ margin: "0 0 10px 0" }}>💵 Pagamento em Dinheiro</h3>
+            <h3 style={{ margin: "0 0 10px 0", color: cores.texto }}>💵 Pagamento em Dinheiro</h3>
             
             <div style={{ background: cores.bgCardSecundario, padding: "12px", borderRadius: "6px", marginBottom: "15px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "15px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "15px", color: cores.texto }}>
                 <span>Total a Pagar:</span>
                 <strong style={{ color: "#28a745" }}>R$ {subtotalComDesconto.toFixed(2)}</strong>
               </div>
@@ -1336,44 +1857,12 @@ export default function Pdv({
         </div>
       )}
 
-      {produtoModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
-          <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "340px", border: `1px solid ${cores.borda}` }}>
-            <h3 style={{ margin: "0 0 10px 0", fontSize: "18px" }}>Adicionar Item</h3>
-            <p style={{ color: cores.textoSecundario, fontSize: "14px", margin: "0 0 15px 0" }}>
-              <strong>{produtoModal.nome}</strong><br />
-              <span style={{ color: corModo, fontWeight: "bold" }}>
-                R$ {tipoTabela === "a_ver" ? "0.00 (A Ver)" : `${getPrecoAtual(produtoModal).toFixed(2)} (${tipoTabela.toUpperCase()})`}
-              </span> | Estoque: {produtoModal.estoque} un {produtoModal.permiteNegativo ? "(Sem trava)" : ""}
-            </p>
-
-            <form onSubmit={confirmarAdicaoModal}>
-              <label style={{ display: "block", fontSize: "13px", marginBottom: "6px", color: cores.textoSecundario }}>Quantidade:</label>
-              <input
-                ref={inputQtdRef}
-                type="number"
-                min="1"
-                max={produtoModal.permiteNegativo ? undefined : produtoModal.estoque}
-                value={qtdInput}
-                onChange={(e) => setQtdInput(e.target.value)}
-                style={{ width: "100%", padding: "12px", fontSize: "22px", fontWeight: "bold", textAlign: "center", background: cores.inputBg, border: `1px solid ${cores.bordaClara}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box", marginBottom: "15px" }}
-              />
-
-              <div style={{ display: "flex", gap: "10px" }}>
-                <button type="button" onClick={() => setProdutoModal(null)} style={{ flex: 1, padding: "10px", background: cores.bgCardSecundario, color: cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "4px", cursor: "pointer" }}>Cancelar</button>
-                <button type="submit" style={{ flex: 1, padding: "10px", background: corModo, color: "#fff", border: "none", borderRadius: "4px", fontWeight: "bold", cursor: "pointer" }}>Confirmar (Enter)</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* ÁREA DA FRENTE DE CAIXA */}
       <div style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: "25px", width: "100%" }}>
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: cores.bgCard, padding: "12px 16px", borderRadius: "6px", marginBottom: "20px", border: `1px solid ${cores.borda}`, flexWrap: "wrap", gap: "10px" }}>
             <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: "14px", fontWeight: "bold", marginRight: "4px" }}>Modo de Venda:</span>
+              <span style={{ fontSize: "14px", fontWeight: "bold", marginRight: "4px", color: cores.texto }}>Modo de Venda:</span>
               <button
                 onClick={() => setTipoTabela("varejo")}
                 style={{ padding: "6px 12px", borderRadius: "4px", border: "none", cursor: "pointer", fontWeight: "bold", background: tipoTabela === "varejo" ? "#28a745" : cores.bgCardSecundario, color: tipoTabela === "varejo" ? "#fff" : cores.texto }}
@@ -1428,7 +1917,7 @@ export default function Pdv({
               }}
             />
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", fontSize: "12px", color: cores.textoSuave, padding: "0 4px" }}>
-              <span>{termo.length === 0 ? "Com busca vazia: Use [1-4] ou [← / →] para modo, [Enter] para Finalizar, [Q] para preço, [Shift] para tamanho" : "Navegue com setas ↑ ↓"}</span>
+              <span>{termo.length === 0 ? "Com busca vazia: Use [1-4] ou [← / →] para modo, [Enter] para Finalizar, [Q] para preço, [F2] para tamanho" : "Navegue com setas ↑ ↓"}</span>
               <span>Pressione F1 para ver os atalhos</span>
             </div>
           </div>
@@ -1486,22 +1975,22 @@ export default function Pdv({
         <div style={{ background: cores.bgCard, padding: "20px", borderRadius: "8px", border: `1px solid ${cores.borda}`, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${cores.borda}`, paddingBottom: "10px" }}>
-              <h2 style={{ margin: 0, fontSize: "20px" }}>Itens da Venda</h2>
+              <h2 style={{ margin: 0, fontSize: "20px", color: cores.texto }}>Itens da Venda</h2>
               <span style={{ fontSize: "12px", background: corModo, color: "#fff", padding: "3px 8px", borderRadius: "4px", fontWeight: "bold" }}>
                 {tipoTabela === "a_ver" ? "MERCADORIA A VER" : tipoTabela.toUpperCase()}
               </span>
             </div>
 
             {carrinho.length === 0 ? (
-              <p style={{ color: cores.textoSuave, marginTop: "20px" }}>Nenhum item adicionado à venda. (Pressione Shift para definir tamanho)</p>
+              <p style={{ color: cores.textoSuave, marginTop: "20px" }}>Nenhum item adicionado à venda. (Pressione F2 para definir tamanho)</p>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "35vh", overflowY: "auto", margin: "15px 0" }}>
                 {carrinho.map((item, idx) => (
                   <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${cores.bordaClara}`, paddingBottom: "8px" }}>
                     <div>
-                      <div><strong>{item.nome}</strong></div>
+                      <div style={{ color: cores.texto }}><strong>{item.nome}</strong></div>
                       <div style={{ fontSize: "12px", color: "#28a745", fontWeight: "bold" }}>
-                        Tamanho: {item.tamanhoSelecionado || "⚠️ Não definido (Pressione Shift)"}
+                        Tamanho: {item.tamanhoSelecionado || "⚠️ Não definido (Pressione F2)"}
                       </div>
                       <div 
                         onClick={() => {
@@ -1514,12 +2003,12 @@ export default function Pdv({
                         style={{ fontSize: "12px", color: cores.textoSecundario, cursor: tipoTabela !== "a_ver" ? "pointer" : "default" }}
                       >
                         {item.referencia ? `Ref: ${item.referencia} | ` : ""}
-                        {item.quantidade}x <span style={{ color: corModo, textDecoration: tipoTabela !== "a_ver" ? "underline" : "none" }}>R$ {Number(item.precoUnitario).toFixed(2)}</span> = <strong>R$ {(Number(item.precoUnitario) * item.quantidade).toFixed(2)}</strong> 
+                        {item.quantidade}x <span style={{ color: corModo, textDecoration: tipoTabela !== "a_ver" ? "underline" : "none" }}>R$ {Number(item.precoUnitario).toFixed(2)}</span> = <strong style={{ color: cores.texto }}>R$ {(Number(item.precoUnitario) * item.quantidade).toFixed(2)}</strong> 
                         {tipoTabela !== "a_ver" && <span style={{ fontSize: "10px", marginLeft: "5px", color: cores.textoSuave }}>(✏️ editar)</span>}
                       </div>
                     </div>
                     <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                      <button onClick={() => abrirModalTamanhoCarrinho(idx)} title="Definir Tamanho (Shift)" style={{ background: "#ffc107", color: "#000", border: "none", borderRadius: "6px", padding: "5px 8px", cursor: "pointer", fontSize: "11px", fontWeight: "bold" }}>👕 Tam</button>
+                      <button onClick={() => abrirModalTamanhoCarrinho(idx)} title="Definir Tamanho (F2)" style={{ background: "#ffc107", color: "#000", border: "none", borderRadius: "6px", padding: "5px 8px", cursor: "pointer", fontSize: "11px", fontWeight: "bold" }}>👕 Tam</button>
                       <button onClick={() => removerDoCarrinho(item.id)} style={{ background: "#e53e3e", color: "#fff", border: "none", borderRadius: "4px", padding: "4px 8px", cursor: "pointer", fontSize: "12px" }}>✕</button>
                     </div>
                   </div>
@@ -1538,7 +2027,7 @@ export default function Pdv({
               </div>
             )}
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px", color: cores.texto }}>
               <span style={{ fontSize: "18px" }}>Total da Venda:</span>
               <span style={{ fontSize: "24px", fontWeight: "bold", color: corModo }}>
                 R$ {subtotalComDesconto.toFixed(2)}

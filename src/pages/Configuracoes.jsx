@@ -2,8 +2,11 @@ import { useState, useEffect } from "react";
 import { db } from "../firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
+const EMAILS_COMPARTILHADOS = ["jarbasantonio201@gmail.com", "lucasesilva438@gmail.com"];
+
 export default function Configuracoes({ usuarioLogado, cores, recarregarConfigLoja }) {
-  const lojaId = usuarioLogado?.uid || "loja_padrao";
+  const isCompartilhado = usuarioLogado?.email && EMAILS_COMPARTILHADOS.includes(usuarioLogado.email);
+  const lojaId = isCompartilhado ? "compartilhado_jarbas_lucas" : (usuarioLogado?.uid || "loja_padrao");
 
   const [nomeLoja, setNomeLoja] = useState("LIFESURF");
   const [logoUrl, setLogoUrl] = useState("");
@@ -83,13 +86,13 @@ export default function Configuracoes({ usuarioLogado, cores, recarregarConfigLo
             onChange={(e) => setLogoUrl(e.target.value)}
             style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.bordaClara}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }}
           />
-          <small style={{ color: cores.textoSuave, fontSize: "11px" }}>Dica: Cole um link direto de imagem hospedada na web para aparecer no topo do cupom.</small>
+          <small style={{ color: cores.textoSuave, fontSize: "11px" }}>Dica: Cole um link direto de imagem hospedada na web (ex: Imgur) para aparecer no topo do cupom.</small>
         </div>
 
         {logoUrl && (
           <div style={{ marginBottom: "15px", textAlign: "center", background: cores.bgCardSecundario, padding: "10px", borderRadius: "6px", border: `1px solid ${cores.borda}` }}>
             <span style={{ display: "block", fontSize: "11px", color: cores.textoSecundario, marginBottom: "5px" }}>Pré-visualização da Logo:</span>
-            <img src={logoUrl} alt="Logo Preview" style={{ maxHeight: "50px", maxWidth: "150px", objectFit: "contain" }} onError={(e) => e.target.style.display = 'none'} />
+            <img src={logoUrl} alt="Logo Preview" style={{ maxHeight: "60px", maxWidth: "180px", objectFit: "contain" }} onError={(e) => e.target.style.display = 'none'} />
           </div>
         )}
 
