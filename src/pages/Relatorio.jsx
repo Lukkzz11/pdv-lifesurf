@@ -117,7 +117,62 @@ export default function Relatorio({
     }
   }
 
+  // INJEÇÃO DINÂMICA DE CSS PARA GARANTIR O TAMANHO EXATO DA BOBINA TÉRMICA (80mm)
+  function injetarEstiloImpressao(tipo) {
+    const antigo = document.getElementById("dinamic-print-style");
+    if (antigo) antigo.remove();
+
+    const style = document.createElement("style");
+    style.id = "dinamic-print-style";
+
+    if (tipo === "recibo") {
+      style.innerHTML = `
+        @media print {
+          @page { size: 80mm auto; margin: 0mm; }
+          body * { visibility: hidden !important; }
+          .print-recibo-local, .print-recibo-local * { visibility: visible !important; }
+          .print-recibo-local { 
+            display: block !important; 
+            position: absolute !important; 
+            left: 0 !important; 
+            top: 0 !important; 
+            width: 76mm !important; 
+            background: #fff !important; 
+            color: #000 !important; 
+            font-family: 'Courier New', Courier, monospace !important; 
+            font-size: 13px !important;
+            font-weight: bold !important;
+            padding: 3mm !important;
+            margin: 0 !important;
+          }
+        }
+      `;
+    } else {
+      style.innerHTML = `
+        @media print {
+          @page { size: A4 portrait; margin: 10mm; }
+          body * { visibility: hidden !important; }
+          .print-fechamento-local, .print-fechamento-local * { visibility: visible !important; }
+          .print-fechamento-local {
+            display: block !important;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            background: #fff !important;
+            color: #000 !important;
+            font-family: Arial, sans-serif !important;
+            padding: 0 !important;
+            box-sizing: border-box;
+          }
+        }
+      `;
+    }
+    document.head.appendChild(style);
+  }
+
   function reimprimirCupom(venda) {
+    injetarEstiloImpressao("recibo");
     setFechamentoLocalImprimir(null);
     setVendaReimprimirLocal(venda);
     setTimeout(() => {
@@ -135,7 +190,7 @@ export default function Relatorio({
       const dadosNovoCaixa = {
         lojaId,
         status: "aberto",
-        ab abertoEm: new Date(),
+        abertoEm: new Date(),
         dataString: dataHojeStr,
         trocoInicial: Number(trocoInicialInput) || 0
       };
@@ -178,6 +233,7 @@ export default function Relatorio({
       vendas: vendasDoCaixaAtual
     };
 
+    injetarEstiloImpressao("fechamento");
     setVendaReimprimirLocal(null);
     setFechamentoLocalImprimir(dadosFechamento);
 
@@ -240,66 +296,23 @@ export default function Relatorio({
 
   return (
     <div style={{ width: "100%", boxSizing: "border-box" }}>
-      <style>{`
-        @media print {
-          @page {
-            margin: 0mm;
-          }
-          body * { visibility: hidden !important; }
-          .print-recibo-local, .print-recibo-local * { visibility: visible !important; }
-          .print-fechamento-local, .print-fechamento-local * { visibility: visible !important; }
-
-          .print-recibo-local { 
-            display: block !important; 
-            position: absolute !important; 
-            left: 0 !important; 
-            top: 0 !important; 
-            width: 76mm !important; 
-            background: #fff !important; 
-            color: #000 !important; 
-            font-family: 'Courier New', Courier, monospace !important; 
-            font-size: 14px !important;
-            font-weight: bold !important;
-            padding: 2mm !important;
-            margin: 0 !important;
-          }
-
-          .print-fechamento-local {
-            display: block !important;
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            background: #fff !important;
-            color: #000 !important;
-            font-family: Arial, sans-serif !important;
-            padding: 10mm !important;
-            box-sizing: border-box;
-          }
-        }
-        @media screen {
-          .print-recibo-local { display: none; }
-          .print-fechamento-local { display: none; }
-        }
-      `}</style>
-
-      {/* 1. CUPOM TÉRMICO (80mm) TAMANHO REAL */}
+      {/* 1. CUPOM TÉRMICO (80mm) */}
       {vendaReimprimirLocal && (
         <div className="print-recibo-local" style={{ color: "#000", background: "#fff", fontWeight: "bold" }}>
           <div style={{ textAlign: "center", marginBottom: "8px" }}>
-            <h2 style={{ margin: 0, fontSize: "16px", fontWeight: "bold" }}>LIFE SURF</h2>
-            <p style={{ margin: "2px 0", fontSize: "12px" }}>COMPROVANTE DE VENDA</p>
-            <p style={{ margin: "2px 0", fontSize: "11px" }}>Pedido: #{vendaReimprimirLocal.id.slice(-6).toUpperCase()}</p>
-            <p style={{ margin: "2px 0", fontSize: "11px" }}>{vendaReimprimirLocal.data?.toDate ? vendaReimprimirLocal.data.toDate().toLocaleString("pt-BR") : new Date().toLocaleString("pt-BR")}</p>
+            <h2 style={{ margin: 0, fontSize: "15px", fontWeight: "bold" }}>LIFE SURF</h2>
+            <p style={{ margin: "2px 0", fontSize: "11px" }}>COMPROVANTE DE VENDA</p>
+            <p style={{ margin: "2px 0", fontSize: "10px" }}>Pedido: #{vendaReimprimirLocal.id.slice(-6).toUpperCase()}</p>
+            <p style={{ margin: "2px 0", fontSize: "10px" }}>{vendaReimprimirLocal.data?.toDate ? vendaReimprimirLocal.data.toDate().toLocaleString("pt-BR") : new Date().toLocaleString("pt-BR")}</p>
           </div>
           <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "12px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "11px" }}>
             <span>ITEM / QTD x VL.UN</span>
             <span>TOTAL</span>
           </div>
           <div style={{ borderBottom: "1px solid #000", margin: "4px 0 6px 0" }}></div>
           {vendaReimprimirLocal.itens?.map((item, i) => (
-            <div key={i} style={{ marginBottom: "6px", fontSize: "12px" }}>
+            <div key={i} style={{ marginBottom: "6px", fontSize: "11px" }}>
               <div>{item.nome} {item.tamanhoSelecionado ? `[Tam: ${item.tamanhoSelecionado}]` : ""}</div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span>{item.quantidade} un x R$ {Number(item.precoUnitario).toFixed(2)}</span>
@@ -308,32 +321,32 @@ export default function Relatorio({
             </div>
           ))}
           {vendaReimprimirLocal.infoTroca?.itemTrocado && (
-            <div style={{ fontSize: "11px", marginTop: "4px", borderTop: "1px solid #000", paddingTop: "4px" }}>
+            <div style={{ fontSize: "10px", marginTop: "4px", borderTop: "1px solid #000", paddingTop: "4px" }}>
               <strong>Obs:</strong> {vendaReimprimirLocal.infoTroca.itemTrocado}
             </div>
           )}
           <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px" }}>
             <span>Subtotal:</span>
             <span>R$ {Number(vendaReimprimirLocal.subtotalBruto || vendaReimprimirLocal.total).toFixed(2)}</span>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "14px", marginTop: "4px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "13px", marginTop: "4px" }}>
             <span>TOTAL PAGO:</span>
             <span>R$ {Number(vendaReimprimirLocal.total || 0).toFixed(2)}</span>
           </div>
           <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
-          <div style={{ textAlign: "center", fontSize: "12px" }}>
+          <div style={{ textAlign: "center", fontSize: "11px" }}>
             <p style={{ margin: "2px 0" }}>Forma: {vendaReimprimirLocal.formaPagamento}</p>
             <p style={{ margin: "2px 0" }}>Modo: {(vendaReimprimirLocal.tipoVenda || "varejo").toUpperCase()}</p>
           </div>
           <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
-          <div style={{ textAlign: "center", fontSize: "11px", marginTop: "8px" }}>
+          <div style={{ textAlign: "center", fontSize: "10px", marginTop: "8px" }}>
             OBRIGADO PELA PREFERÊNCIA! VOLTE SEMPRE!
           </div>
         </div>
       )}
 
-      {/* 2. RELATÓRIO DE FECHAMENTO (GRID A4 SEM CORTES) */}
+      {/* 2. RELATÓRIO DE FECHAMENTO (A4) */}
       {fechamentoLocalImprimir && (
         <div className="print-fechamento-local" style={{ color: "#000", background: "#fff", boxSizing: "border-box" }}>
           <div style={{ textAlign: "center", marginBottom: "20px", borderBottom: "2px solid #000", paddingBottom: "12px" }}>
@@ -341,7 +354,7 @@ export default function Relatorio({
             <p style={{ margin: "5px 0 0 0", fontSize: "12px" }}>Data: <strong>{fechamentoLocalImprimir.dataHoje}</strong> | Fechamento: <strong>{fechamentoLocalImprimir.horaFechamento}</strong></p>
           </div>
           
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "8px", border: "1px solid #000", padding: "10px", marginBottom: "20px", fontSize: "11px", textAlign: "center", background: "#f9f9f9", boxSizing: "border-box" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "6px", border: "1px solid #000", padding: "10px", marginBottom: "20px", fontSize: "11px", textAlign: "center", background: "#f9f9f9", boxSizing: "border-box" }}>
             <div style={{ boxSizing: "border-box" }}>Fundo Troco: <br/><strong style={{ fontSize: "12px" }}>R$ {fechamentoLocalImprimir.trocoInicial.toFixed(2)}</strong></div>
             <div style={{ boxSizing: "border-box" }}>Vendas: <br/><strong style={{ fontSize: "12px" }}>{fechamentoLocalImprimir.qtdVendas}</strong></div>
             <div style={{ boxSizing: "border-box" }}>Dinheiro: <br/><strong style={{ fontSize: "12px" }}>R$ {fechamentoLocalImprimir.dinheiroHoje.toFixed(2)}</strong></div>
@@ -528,7 +541,7 @@ export default function Relatorio({
         </p>
         <button
           onClick={handleLimparVendasAntigas}
-          processandoLimpeza={processandoLimpeza}
+          disabled={processandoLimpeza}
           style={{ background: "#6366f1", color: "#fff", border: "none", padding: "10px 16px", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "13px" }}
         >
           {processandoLimpeza ? "Limpando e Arquivando..." : "🗑️ Limpar Vendas com Mais de 30 Dias (Otimizar Memória)"}
