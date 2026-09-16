@@ -135,7 +135,7 @@ export default function Relatorio({
       const dadosNovoCaixa = {
         lojaId,
         status: "aberto",
-        abertoEm: new Date(),
+        ab abertoEm: new Date(),
         dataString: dataHojeStr,
         trocoInicial: Number(trocoInicialInput) || 0
       };
@@ -242,39 +242,38 @@ export default function Relatorio({
     <div style={{ width: "100%", boxSizing: "border-box" }}>
       <style>{`
         @media print {
+          @page {
+            margin: 0mm;
+          }
           body * { visibility: hidden !important; }
           .print-recibo-local, .print-recibo-local * { visibility: visible !important; }
           .print-fechamento-local, .print-fechamento-local * { visibility: visible !important; }
 
-          @page {
-            size: A4 portrait;
-            margin: 8mm;
-          }
-
           .print-recibo-local { 
             display: block !important; 
-            position: absolute; 
-            left: 0; 
-            top: 0; 
-            width: 80mm !important; 
+            position: absolute !important; 
+            left: 0 !important; 
+            top: 0 !important; 
+            width: 76mm !important; 
             background: #fff !important; 
             color: #000 !important; 
             font-family: 'Courier New', Courier, monospace !important; 
-            font-size: 13px !important;
+            font-size: 14px !important;
             font-weight: bold !important;
-            padding: 4mm !important;
+            padding: 2mm !important;
+            margin: 0 !important;
           }
 
           .print-fechamento-local {
             display: block !important;
-            position: absolute;
-            left: 0;
-            top: 0;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
             width: 100% !important;
             background: #fff !important;
             color: #000 !important;
             font-family: Arial, sans-serif !important;
-            padding: 5mm !important;
+            padding: 10mm !important;
             box-sizing: border-box;
           }
         }
@@ -284,7 +283,7 @@ export default function Relatorio({
         }
       `}</style>
 
-      {/* 1. CUPOM TÉRMICO (80mm) COM FONTE IDEAL */}
+      {/* 1. CUPOM TÉRMICO (80mm) TAMANHO REAL */}
       {vendaReimprimirLocal && (
         <div className="print-recibo-local" style={{ color: "#000", background: "#fff", fontWeight: "bold" }}>
           <div style={{ textAlign: "center", marginBottom: "8px" }}>
@@ -334,7 +333,7 @@ export default function Relatorio({
         </div>
       )}
 
-      {/* 2. RELATÓRIO DE FECHAMENTO (GRID BLOQUEADO CONTRA CORTE) */}
+      {/* 2. RELATÓRIO DE FECHAMENTO (GRID A4 SEM CORTES) */}
       {fechamentoLocalImprimir && (
         <div className="print-fechamento-local" style={{ color: "#000", background: "#fff", boxSizing: "border-box" }}>
           <div style={{ textAlign: "center", marginBottom: "20px", borderBottom: "2px solid #000", paddingBottom: "12px" }}>
@@ -342,13 +341,13 @@ export default function Relatorio({
             <p style={{ margin: "5px 0 0 0", fontSize: "12px" }}>Data: <strong>{fechamentoLocalImprimir.dataHoje}</strong> | Fechamento: <strong>{fechamentoLocalImprimir.horaFechamento}</strong></p>
           </div>
           
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "6px", border: "1px solid #000", padding: "10px", marginBottom: "20px", fontSize: "11px", textAlign: "center", background: "#f9f9f9", boxSizing: "border-box" }}>
-            <div>Fundo Troco: <br/><strong style={{ fontSize: "13px" }}>R$ {fechamentoLocalImprimir.trocoInicial.toFixed(2)}</strong></div>
-            <div>Vendas: <br/><strong style={{ fontSize: "13px" }}>{fechamentoLocalImprimir.qtdVendas}</strong></div>
-            <div>Dinheiro: <br/><strong style={{ fontSize: "13px" }}>R$ {fechamentoLocalImprimir.dinheiroHoje.toFixed(2)}</strong></div>
-            <div>Pix: <br/><strong style={{ fontSize: "13px" }}>R$ {fechamentoLocalImprimir.pixHoje.toFixed(2)}</strong></div>
-            <div>Cartões: <br/><strong style={{ fontSize: "13px" }}>R$ {fechamentoLocalImprimir.debitoHoje.toFixed(2)}</strong></div>
-            <div>TOTAL TURNO: <br/><strong style={{ fontSize: "13px", color: "#000" }}>R$ {fechamentoLocalImprimir.totalVendido.toFixed(2)}</strong></div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "8px", border: "1px solid #000", padding: "10px", marginBottom: "20px", fontSize: "11px", textAlign: "center", background: "#f9f9f9", boxSizing: "border-box" }}>
+            <div style={{ boxSizing: "border-box" }}>Fundo Troco: <br/><strong style={{ fontSize: "12px" }}>R$ {fechamentoLocalImprimir.trocoInicial.toFixed(2)}</strong></div>
+            <div style={{ boxSizing: "border-box" }}>Vendas: <br/><strong style={{ fontSize: "12px" }}>{fechamentoLocalImprimir.qtdVendas}</strong></div>
+            <div style={{ boxSizing: "border-box" }}>Dinheiro: <br/><strong style={{ fontSize: "12px" }}>R$ {fechamentoLocalImprimir.dinheiroHoje.toFixed(2)}</strong></div>
+            <div style={{ boxSizing: "border-box" }}>Pix: <br/><strong style={{ fontSize: "12px" }}>R$ {fechamentoLocalImprimir.pixHoje.toFixed(2)}</strong></div>
+            <div style={{ boxSizing: "border-box" }}>Cartões: <br/><strong style={{ fontSize: "12px" }}>R$ {fechamentoLocalImprimir.debitoHoje.toFixed(2)}</strong></div>
+            <div style={{ boxSizing: "border-box" }}>TOTAL TURNO: <br/><strong style={{ fontSize: "12px", color: "#000" }}>R$ {fechamentoLocalImprimir.totalVendido.toFixed(2)}</strong></div>
           </div>
 
           <h4 style={{ fontSize: "14px", borderBottom: "1px solid #000", paddingBottom: "5px", marginBottom: "10px", fontWeight: "bold" }}>Vendas Registradas no Turno</h4>
@@ -529,7 +528,7 @@ export default function Relatorio({
         </p>
         <button
           onClick={handleLimparVendasAntigas}
-          disabled={processandoLimpeza}
+          processandoLimpeza={processandoLimpeza}
           style={{ background: "#6366f1", color: "#fff", border: "none", padding: "10px 16px", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "13px" }}
         >
           {processandoLimpeza ? "Limpando e Arquivando..." : "🗑️ Limpar Vendas com Mais de 30 Dias (Otimizar Memória)"}
