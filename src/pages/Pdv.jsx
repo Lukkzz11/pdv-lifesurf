@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { db } from "../firebase";
-import { 
-  collection, 
-  doc, 
-  runTransaction, 
-  serverTimestamp, 
-  addDoc 
+import {
+  collection,
+  doc,
+  runTransaction,
+  serverTimestamp,
+  addDoc
 } from "firebase/firestore";
 
 const TAXAS_CARTAO = {
@@ -24,16 +24,34 @@ const FORMAS_PAGAMENTO = [
 
 const EMAILS_COMPARTILHADOS = ["jarbasantonio201@gmail.com", "lucasesilva438@gmail.com"];
 
-export default function Pdv({ 
-  produtos, 
-  caixaAberto, 
-  usuarioLogado, 
-  cores, 
-  tema, 
-  recarregarDados, 
-  setDadosRecibo 
+function parseTamanhos(str) {
+  const res = {};
+  if (!str || str === "Tamanho único") return res;
+  str.split(" | ").forEach(part => {
+    const [k, v] = part.split(":");
+    if (k && v) res[k.trim()] = parseInt(v.trim(), 10) || 0;
+  });
+  return res;
+}
+
+function serializeTamanhos(obj) {
+  const arr = [];
+  Object.keys(obj).forEach(k => {
+    if (obj[k] > 0) arr.push(`${k}: ${obj[k]}`);
+  });
+  return arr.length > 0 ? arr.join(" | ") : "Tamanho único";
+}
+
+export default function Pdv({
+  produtos,
+  caixaAberto,
+  usuarioLogado,
+  cores,
+  tema,
+  recarregarDados,
+  setDadosRecibo
 }) {
-  const [tipoTabela, setTipoTabela] = useState("varejo"); 
+  const [tipoTabela, setTipoTabela] = useState("varejo");
   const [carrinho, setCarrinho] = useState([]);
   const [buscaPdv, setBuscaPdv] = useState("");
   const [indiceFocoBusca, setIndiceFocoBusca] = useState(0);
@@ -50,6 +68,15 @@ export default function Pdv({
 
   const [modalAtalhosAberto, setModalAtalhosAberto] = useState(false);
 
+  // Modal de Tamanho Avançado no Carrinho (Tecla Shift)
+  const [modalTamanhoCarrinhoAberto, setModalTamanhoCarrinhoAberto] = useState(false);
+  const [itemSelecionadoCarrinhoIdx, setItemSelecionadoCarrinhoIdx] = useState(null);
+  const [etapaTamanhoModal, setEtapaTamanhoModal] = useState("lista"); // "lista" | "qtd"
+  const [tamanhoSelecionadoTemp, setTamanhoSelecionadoTemp] = useState("");
+  const [qtdTamanhoTemp, setQtdTamanhoTemp] = useState("1");
+  const [tamanhosDisponiveisTemp, setTamanhosDisponiveisTemp] = useState({});
+  const inputQtdTamRef = useRef(null);
+
   const [modalTrocaInfoAberto, setModalTrocaInfoAberto] = useState(false);
   const [itemTrocadoInput, setItemTrocadoInput] = useState("");
   const [valorDiferencaInput, setValorDiferencaInput] = useState("");
@@ -60,6 +87,7 @@ export default function Pdv({
 
   const [modalAVerInfoAberto, setModalAVerInfoAberto] = useState(false);
   const [nomeResponsavelAVer, setNomeResponsavelAVer] = useState("");
+  const [dataAVer, setDataAVer] = useState(new Date().toISOString().split("T")[0]);
   const [observacaoAVer, setObservacaoAVer] = useState("");
   const inputAVer1Ref = useRef(null);
   const inputAVer2Ref = useRef(null);
@@ -80,13 +108,14 @@ export default function Pdv({
   const [valorEntregueInput, setValorEntregueInput] = useState("");
   const inputDinheiroRef = useRef(null);
 
+  const [dadosReciboLocal, setDadosReciboLocal] = useState(null);
   const listaBuscaRef = useRef(null);
 
   const isCompartilhado = usuarioLogado?.email && EMAILS_COMPARTILHADOS.includes(usuarioLogado.email);
   const lojaIdAtual = isCompartilhado ? "compartilhado_jarbas_lucas" : (usuarioLogado?.uid || "loja_padrao");
 
   // Cores dinâmicas por modo de venda
-  const corModo = 
+  const corModo =
     tipoTabela === "atacado" ? "#007bff" :
     tipoTabela === "troca" ? "#e67e22" :
     tipoTabela === "a_ver" ? "#8e44ad" : "#28a745";
@@ -108,21 +137,25 @@ export default function Pdv({
     } else if (modalDinheiroAberto && inputDinheiroRef.current) {
       inputDinheiroRef.current.focus();
       inputDinheiroRef.current.select();
+    } else if (etapaTamanhoModal === "qtd" && inputQtdTamRef.current) {
+      inputQtdTamRef.current.focus();
+      inputQtdTamRef.current.select();
     } else if (
-      !produtoModal && 
+      !produtoModal &&
       !itemEditandoPreco &&
       !modalAtalhosAberto &&
-      !modalDescontoAberto && 
-      !modalFormaPagtoAberto && 
-      !modalCartaoAberto && 
-      !modalDinheiroAberto && 
+      !modalDescontoAberto &&
+      !modalFormaPagtoAberto &&
+      !modalCartaoAberto &&
+      !modalDinheiroAberto &&
       !modalTrocaInfoAberto &&
       !modalAVerInfoAberto &&
+      !modalTamanhoCarrinhoAberto &&
       inputBuscaRef.current
     ) {
       inputBuscaRef.current.focus();
     }
-  }, [produtoModal, itemEditandoPreco, modalAtalhosAberto, modalDescontoAberto, modalFormaPagtoAberto, modalCartaoAberto, modalDinheiroAberto, modalTrocaInfoAberto, modalAVerInfoAberto]);
+  }, [produtoModal, itemEditandoPreco, modalAtalhosAberto, modalDescontoAberto, modalFormaPagtoAberto, modalCartaoAberto, modalDinheiroAberto, modalTrocaInfoAberto, modalAVerInfoAberto, modalTamanhoCarrinhoAberto, etapaTamanhoModal]);
 
   useEffect(() => {
     if (tipoTabela === "varejo" || tipoTabela === "atacado") {
@@ -194,6 +227,8 @@ export default function Pdv({
           permiteNegativo: !!produtoModal.permiteNegativo,
           precoUnitario: precoCobrado,
           quantidade: quantidade,
+          tamanhosDisponiveis: produtoModal.tamanhos || "Tamanho único",
+          tamanhoSelecionado: ""
         }
       ]);
     }
@@ -201,6 +236,70 @@ export default function Pdv({
     setProdutoModal(null);
     setBuscaPdv("");
     setIndiceFocoBusca(0);
+  }
+
+  function abrirModalTamanhoCarrinho(idx) {
+    setItemSelecionadoCarrinhoIdx(idx);
+    const item = carrinho[idx];
+    if (!item) return;
+
+    const prodReal = produtos.find(p => p.id === item.id);
+    const dispStr = prodReal ? prodReal.tamanhos : item.tamanhosDisponiveis;
+    const baseObj = parseTamanhos(dispStr);
+
+    const jaSelecionados = parseTamanhosObs(item.tamanhoSelecionado);
+    Object.keys(jaSelecionados).forEach(t => {
+      if (baseObj[t] !== undefined) {
+        baseObj[t] = Math.max(0, baseObj[t] - jaSelecionados[t]);
+      }
+    });
+
+    setTamanhosDisponiveisTemp(baseObj);
+    setEtapaTamanhoModal("lista");
+    setTamanhoSelecionadoTemp("");
+    setQtdTamanhoTemp("1");
+    setModalTamanhoCarrinhoAberto(true);
+  }
+
+  function confirmarQtdTamanhoModal(e) {
+    if (e) e.preventDefault();
+    const qtdRetirada = parseInt(qtdTamanhoTemp, 10);
+    if (isNaN(qtdRetirada) || qtdRetirada <= 0) {
+      alert("Informe uma quantidade válida!");
+      return;
+    }
+
+    const dispAtual = tamanhosDisponiveisTemp[tamanhoSelecionadoTemp] || 0;
+    if (qtdRetirada > dispAtual) {
+      alert(`Quantidade indisponível para o tamanho ${tamanhoSelecionadoTemp}! Disponível: ${dispAtual}`);
+      return;
+    }
+
+    const itemAtual = carrinho[itemSelecionadoCarrinhoIdx];
+    const obsAtual = itemAtual.tamanhoSelecionado ? parseTamanhosObs(itemAtual.tamanhoSelecionado) : {};
+    obsAtual[tamanhoSelecionadoTemp] = (obsAtual[tamanhoSelecionadoTemp] || 0) + qtdRetirada;
+
+    const novaStringObs = serializeTamanhos(obsAtual);
+
+    setCarrinho(carrinho.map((it, idx) => 
+      idx === itemSelecionadoCarrinhoIdx ? { ...it, tamanhoSelecionado: novaStringObs } : it
+    ));
+
+    const novoDisp = { ...tamanhosDisponiveisTemp, [tamanhoSelecionadoTemp]: dispAtual - qtdRetirada };
+    setTamanhosDisponiveisTemp(novoDisp);
+    setEtapaTamanhoModal("lista");
+    setTamanhoSelecionadoTemp("");
+    setQtdTamanhoTemp("1");
+  }
+
+  function parseTamanhosObs(str) {
+    const res = {};
+    if (!str) return res;
+    str.split(" | ").forEach(part => {
+      const [k, v] = part.split(":");
+      if (k && v) res[k.trim()] = parseInt(v.trim(), 10) || 0;
+    });
+    return res;
   }
 
   function salvarPrecoItemModal(e) {
@@ -250,8 +349,23 @@ export default function Pdv({
         return;
       }
 
-      if (!produtoModal && !itemEditandoPreco && !modalDescontoAberto && !modalFormaPagtoAberto && !modalCartaoAberto && !modalDinheiroAberto && !modalAtalhosAberto && !modalTrocaInfoAberto && !modalAVerInfoAberto) {
-        if (buscaPdv.trim() === "" && !isInputBuscaFocado) {
+      if (e.key === "Escape") {
+        if (modalAtalhosAberto) { setModalAtalhosAberto(false); return; }
+        if (modalTrocaInfoAberto) { setModalTrocaInfoAberto(false); return; }
+        if (modalAVerInfoAberto) { setModalAVerInfoAberto(false); return; }
+        if (modalDescontoAberto) { setModalDescontoAberto(false); return; }
+        if (modalFormaPagtoAberto) { setModalFormaPagtoAberto(false); return; }
+        if (modalCartaoAberto) { setModalCartaoAberto(false); setModalFormaPagtoAberto(true); return; }
+        if (modalDinheiroAberto) { setModalDinheiroAberto(false); setModalFormaPagtoAberto(true); return; }
+        if (produtoModal) { setProdutoModal(null); return; }
+        if (itemEditandoPreco) { setItemEditandoPreco(null); return; }
+        if (modalTamanhoCarrinhoAberto) { setModalTamanhoCarrinhoAberto(false); return; }
+      }
+
+      const anyModalOpen = modalAtalhosAberto || modalTrocaInfoAberto || modalAVerInfoAberto || modalDescontoAberto || modalFormaPagtoAberto || modalCartaoAberto || modalDinheiroAberto || produtoModal || itemEditandoPreco || modalTamanhoCarrinhoAberto;
+
+      if (!anyModalOpen && !isInputBuscaFocado) {
+        if (buscaPdv.trim() === "") {
           if (e.key === "1") { e.preventDefault(); setTipoTabela("varejo"); return; }
           if (e.key === "2") { e.preventDefault(); setTipoTabela("atacado"); return; }
           if (e.key === "3") { e.preventDefault(); setTipoTabela("troca"); return; }
@@ -259,19 +373,36 @@ export default function Pdv({
         }
       }
 
-      if (e.key.toLowerCase() === "q" && !produtoModal && !itemEditandoPreco && !modalDescontoAberto && !modalFormaPagtoAberto && !modalCartaoAberto && !modalDinheiroAberto && !modalAtalhosAberto && !modalTrocaInfoAberto && !modalAVerInfoAberto) {
-        if (buscaPdv.trim() === "" && carrinho.length > 0 && !isInputBuscaFocado && tipoTabela !== "a_ver") {
+      if (!anyModalOpen && buscaPdv.trim() === "" && !isInputBuscaFocado) {
+        if (e.key === "ArrowRight") {
           e.preventDefault();
-          const ultimoItem = carrinho[carrinho.length - 1];
-          setItemEditandoPreco(ultimoItem);
-          setNovoPrecoInput(ultimoItem.precoUnitario.toString());
+          if (tipoTabela === "varejo") setTipoTabela("atacado");
+          else if (tipoTabela === "atacado") setTipoTabela("troca");
+          else if (tipoTabela === "troca") setTipoTabela("a_ver");
+          else if (tipoTabela === "a_ver") setTipoTabela("varejo");
+          return;
+        }
+        if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          if (tipoTabela === "varejo") setTipoTabela("a_ver");
+          else if (tipoTabela === "a_ver") setTipoTabela("troca");
+          else if (tipoTabela === "troca") setTipoTabela("atacado");
+          else if (tipoTabela === "atacado") setTipoTabela("varejo");
           return;
         }
       }
 
-      if (modalDescontoAberto) {
-        if (e.key === "ArrowLeft") { e.preventDefault(); setTipoDesconto("reais"); }
-        else if (e.key === "ArrowRight") { e.preventDefault(); setTipoDesconto("porcentagem"); }
+      if (e.key === "Shift" && !anyModalOpen && buscaPdv.trim() === "" && carrinho.length > 0 && !isInputBuscaFocado) {
+        e.preventDefault();
+        abrirModalTamanhoCarrinho(carrinho.length - 1);
+        return;
+      }
+
+      if (e.key.toLowerCase() === "q" && !anyModalOpen && buscaPdv.trim() === "" && carrinho.length > 0 && tipoTabela !== "a_ver" && !isInputBuscaFocado) {
+        e.preventDefault();
+        const ultimoItem = carrinho[carrinho.length - 1];
+        setItemEditandoPreco(ultimoItem);
+        setNovoPrecoInput(ultimoItem.precoUnitario.toString());
         return;
       }
 
@@ -300,8 +431,6 @@ export default function Pdv({
           } else {
             executarVendaNoBanco(subtotalComDesconto, formaEscolhida, null, null);
           }
-        } else if (e.key === "Escape") {
-          setModalFormaPagtoAberto(false);
         }
         return;
       }
@@ -326,9 +455,6 @@ export default function Pdv({
 
           setModalCartaoAberto(false);
           executarVendaNoBanco(totalComTaxa, descPagamento, info, null);
-        } else if (e.key === "Escape") {
-          setModalCartaoAberto(false);
-          setModalFormaPagtoAberto(true);
         }
         return;
       }
@@ -358,6 +484,7 @@ export default function Pdv({
 
     if (tipoTabela === "a_ver") {
       setNomeResponsavelAVer("");
+      setDataAVer(new Date().toISOString().split("T")[0]);
       setObservacaoAVer("");
       setModalAVerInfoAberto(true);
       return;
@@ -419,7 +546,10 @@ export default function Pdv({
     try {
       const hoje = new Date();
       const dataString = hoje.toLocaleDateString("pt-BR");
-      const obsTexto = `Responsável: ${nomeResponsavelAVer.trim()} ${observacaoAVer ? `| Obs: ${observacaoAVer.trim()}` : ""}`;
+      const nomeLimpo = nomeResponsavelAVer.trim().toLowerCase();
+      const isJarbasOuLucas = nomeLimpo === "jarbas" || nomeLimpo === "lucas" || nomeLimpo.includes("jarbas") || nomeLimpo.includes("lucas");
+
+      const obsTexto = `Responsável: ${nomeResponsavelAVer.trim()} | Data: ${dataAVer} | Valor: R$ ${subtotalBruto.toFixed(2)} ${observacaoAVer ? `| Obs: ${observacaoAVer.trim()}` : ""}`;
 
       await runTransaction(db, async (transaction) => {
         const leituras = [];
@@ -435,11 +565,23 @@ export default function Pdv({
             throw new Error(`Estoque insuficiente para ${item.nome}!`);
           }
 
-          leituras.push({ ref, novoEstoque: estoqueAtual - item.quantidade });
+          let novoTamanhosStr = snap.data().tamanhos || "";
+          if (item.tamanhoSelecionado) {
+            const objT = parseTamanhos(novoTamanhosStr);
+            const escolhidos = parseTamanhos(item.tamanhoSelecionado);
+            Object.keys(escolhidos).forEach(tam => {
+              if (objT[tam] >= escolhidos[tam]) {
+                objT[tam] -= escolhidos[tam];
+              }
+            });
+            novoTamanhosStr = serializeTamanhos(objT);
+          }
+
+          leituras.push({ ref, novoEstoque: estoqueAtual - item.quantidade, novoTamanhosStr });
         }
 
         for (const item of leituras) {
-          transaction.update(item.ref, { estoque: item.novoEstoque });
+          transaction.update(item.ref, { estoque: item.novoEstoque, tamanhos: item.novoTamanhosStr });
         }
 
         const vendaRef = doc(collection(db, "vendas"));
@@ -450,17 +592,19 @@ export default function Pdv({
           tipoVenda: "a_ver",
           operadorEmail: usuarioLogado?.email || "operador",
           lojaId: lojaIdAtual,
+          naoComputarNoCaixa: isJarbasOuLucas,
           itens: carrinho.map((item) => ({
             id: item.id,
             nome: item.nome,
             referencia: item.referencia,
             codigoBarras: item.codigoBarras,
-            precoUnitario: 0,
+            tamanhoSelecionado: item.tamanhoSelecionado || "",
+            precoUnitario: item.precoUnitario,
             quantidade: item.quantidade,
           })),
-          subtotalBruto: 0,
+          subtotalBruto: subtotalBruto,
           desconto: 0,
-          total: 0,
+          total: subtotalBruto, // Salva o valor real para o relatório constar o montante
           formaPagamento: "A Ver",
           infoTroca: { itemTrocado: obsTexto, valorDiferenca: 0, levouAlgoMais: "" }
         });
@@ -471,14 +615,17 @@ export default function Pdv({
           cliente: nomeResponsavelAVer.trim(),
           tipo: "mercadoria_a_ver",
           status: "pendente_prova",
-          itensDescricao: carrinho.map(i => `${i.quantidade}x ${i.nome}`).join("; "),
+          isJarbasOuLucas,
+          valorTotalMercadoria: subtotalBruto,
+          dataRetirada: dataAVer,
+          itensDescricao: carrinho.map(i => `${i.quantidade}x ${i.nome} ${i.tamanhoSelecionado ? `(${i.tamanhoSelecionado})` : ""}`).join("; "),
           observacao: observacaoAVer.trim(),
           itens: carrinho,
           data: serverTimestamp()
         });
       });
 
-      alert("Mercadoria a ver registrada com sucesso!");
+      alert(isJarbasOuLucas ? "Retirada registrada para Jarbas/Lucas (Isolado do caixa)!" : "Mercadoria a ver registrada com sucesso (Valor consta no relatório)!");
       setCarrinho([]);
       setDescontoAplicado({ tipo: "reais", valor: 0, totalDescontado: 0 });
       await recarregarDados();
@@ -512,18 +659,31 @@ export default function Pdv({
           const snap = await transaction.get(ref);
           if (!snap.exists()) throw new Error(`Produto ${item.nome} não encontrado!`);
           
-          const estoqueAtual = snap.data().estoque;
+          let estoqueAtual = snap.data().estoque;
           const aceitaNegativo = snap.data().permiteNegativo || false;
+          let novoTamanhosStr = snap.data().tamanhos || "";
 
           if (!aceitaNegativo && estoqueAtual < item.quantidade) {
             throw new Error(`Estoque insuficiente para ${item.nome}!`);
           }
+          estoqueAtual -= item.quantidade;
 
-          leituras.push({ ref, novoEstoque: estoqueAtual - item.quantidade });
+          if (item.tamanhoSelecionado) {
+            const objT = parseTamanhos(novoTamanhosStr);
+            const escolhidos = parseTamanhos(item.tamanhoSelecionado);
+            Object.keys(escolhidos).forEach(tam => {
+              if (objT[tam] >= escolhidos[tam]) {
+                objT[tam] -= escolhidos[tam];
+              }
+            });
+            novoTamanhosStr = serializeTamanhos(objT);
+          }
+
+          leituras.push({ ref, novoEstoque: estoqueAtual, novoTamanhosStr });
         }
 
         for (const item of leituras) {
-          transaction.update(item.ref, { estoque: item.novoEstoque });
+          transaction.update(item.ref, { estoque: item.novoEstoque, tamanhos: item.novoTamanhosStr });
         }
 
         const vendaRef = doc(collection(db, "vendas"));
@@ -541,6 +701,7 @@ export default function Pdv({
             nome: item.nome,
             referencia: item.referencia,
             codigoBarras: item.codigoBarras,
+            tamanhoSelecionado: item.tamanhoSelecionado || "",
             precoUnitario: item.precoUnitario,
             quantidade: item.quantidade,
           })),
@@ -655,6 +816,89 @@ export default function Pdv({
 
   return (
     <>
+      <style>{`
+        @media print {
+          body * { visibility: hidden !important; }
+          .print-recibo, .print-recibo * { visibility: visible !important; }
+          .print-recibo { 
+            display: block !important; 
+            position: absolute; 
+            left: 0; 
+            top: 0; 
+            width: 80mm !important; 
+            background: #fff !important; 
+            color: #000 !important; 
+            font-family: 'Courier New', Courier, monospace !important; 
+            font-size: 11px !important;
+            padding: 4mm !important;
+          }
+        }
+        @media screen {
+          .print-recibo { display: none; }
+        }
+        .input-animado:focus {
+          border-color: #28a745 !important;
+          box-shadow: 0 0 10px rgba(40, 167, 69, 0.25);
+          background: rgba(40, 167, 69, 0.03);
+        }
+      `}</style>
+
+      {/* RECIBO TÉRMICO 80mm */}
+      {dadosReciboLocal && (
+        <div className="print-recibo">
+          <div style={{ textAlign: "center", marginBottom: "8px" }}>
+            <h2 style={{ margin: 0, fontSize: "14px", fontWeight: "bold" }}>LIFE SURF</h2>
+            <p style={{ margin: "2px 0", fontSize: "10px" }}>COMPROVANTE DE VENDA</p>
+            <p style={{ margin: "2px 0", fontSize: "9px" }}>Pedido: #{dadosReciboLocal.id}</p>
+            <p style={{ margin: "2px 0", fontSize: "9px" }}>{dadosReciboLocal.dataHora}</p>
+          </div>
+          <div style={{ borderBottom: "1px dashed #000", margin: "6px 0" }}></div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "10px" }}>
+            <span>ITEM / TAM / QTD x VL.UN</span>
+            <span>TOTAL</span>
+          </div>
+          <div style={{ borderBottom: "1px dashed #000", margin: "4px 0 6px 0" }}></div>
+          {dadosReciboLocal.itens.map((item, i) => (
+            <div key={i} style={{ marginBottom: "6px", fontSize: "10px" }}>
+              <div>{item.nome} {item.tamanhoSelecionado ? `[Tam: ${item.tamanhoSelecionado}]` : ""}</div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>{item.quantidade}x R$ {Number(item.precoUnitario).toFixed(2)}</span>
+                <span>R$ {(item.quantidade * item.precoUnitario).toFixed(2)}</span>
+              </div>
+            </div>
+          ))}
+          {dadosReciboLocal.infoTroca && (
+            <div style={{ fontSize: "9px", marginTop: "4px", borderTop: "1px dotted #000", paddingTop: "4px" }}>
+              <strong>Obs/Troca:</strong> {dadosReciboLocal.infoTroca.itemTrocado}
+            </div>
+          )}
+          <div style={{ borderBottom: "1px dashed #000", margin: "6px 0" }}></div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px" }}>
+            <span>Subtotal:</span>
+            <span>R$ {dadosReciboLocal.subtotalBruto.toFixed(2)}</span>
+          </div>
+          {dadosReciboLocal.desconto > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px" }}>
+              <span>Desconto:</span>
+              <span>- R$ {dadosReciboLocal.desconto.toFixed(2)}</span>
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "12px", marginTop: "4px" }}>
+            <span>TOTAL PAGO:</span>
+            <span>R$ {dadosReciboLocal.total.toFixed(2)}</span>
+          </div>
+          <div style={{ borderBottom: "1px dashed #000", margin: "6px 0" }}></div>
+          <div style={{ textAlign: "center", fontSize: "10px" }}>
+            <p style={{ margin: "2px 0" }}>Forma: {dadosReciboLocal.formaPagamento}</p>
+            <p style={{ margin: "2px 0" }}>Modo: {dadosReciboLocal.tipoVenda.toUpperCase()}</p>
+          </div>
+          <div style={{ borderBottom: "1px dashed #000", margin: "6px 0" }}></div>
+          <div style={{ textAlign: "center", fontSize: "9px", marginTop: "8px" }}>
+            OBRIGADO PELA PREFERÊNCIA! VOLTE SEMPRE!
+          </div>
+        </div>
+      )}
+
       {modalAtalhosAberto && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
           <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "420px", border: `1px solid ${cores.borda}` }}>
@@ -664,12 +908,96 @@ export default function Pdv({
               <li><strong>Setas ← / → (com busca vazia):</strong> Alternam os modos de venda.</li>
               <li><strong>Enter (com busca vazia):</strong> Inicia o fechamento da venda ou preenchimento especial.</li>
               <li><strong>Setas (↑ ↓):</strong> Navegam pelos produtos na busca com rolagem automática.</li>
+              <li><strong>Tecla Shift (com busca vazia):</strong> Gerencia os tamanhos do último item do carrinho.</li>
               <li><strong>Tecla Q (com busca vazia):</strong> Altera o preço do último item do carrinho.</li>
               <li><strong>F1:</strong> Abre / fecha este painel de ajuda.</li>
             </ul>
             <button onClick={() => setModalAtalhosAberto(false)} style={{ width: "100%", padding: "10px", background: "#007bff", color: "#fff", border: "none", borderRadius: "4px", fontWeight: "bold", cursor: "pointer" }}>
               Fechar (Esc / F1)
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE SELEÇÃO DE TAMANHO COM SHIFT */}
+      {modalTamanhoCarrinhoAberto && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999, padding: "15px", boxSizing: "border-box" }}>
+          <div style={{ background: cores.bgCard, padding: "20px", borderRadius: "10px", width: "100%", maxWidth: "420px", border: `1px solid ${cores.borda}` }}>
+            <h3 style={{ margin: "0 0 10px 0", fontSize: "16px" }}>👕 Gerenciar Tamanhos da Peça</h3>
+            <p style={{ fontSize: "12px", color: cores.textoSecundario, marginBottom: "15px" }}>
+              Item: <strong>{carrinho[itemSelecionadoCarrinhoIdx]?.nome}</strong>
+            </p>
+
+            {etapaTamanhoModal === "lista" ? (
+              <div>
+                <p style={{ fontSize: "11px", color: cores.textoSecundario, marginBottom: "10px" }}>Selecione um tamanho disponível:</p>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px", marginBottom: "15px", maxHeight: "200px", overflowY: "auto" }}>
+                  {Object.keys(tamanhosDisponiveisTemp).length === 0 ? (
+                    <p style={{ fontSize: "12px", color: cores.textoSuave, gridColumn: "1 / -1" }}>Nenhum tamanho cadastrado neste produto.</p>
+                  ) : (
+                    Object.keys(tamanhosDisponiveisTemp).map(tam => {
+                      const disp = tamanhosDisponiveisTemp[tam];
+                      return (
+                        <button
+                          key={tam}
+                          type="button"
+                          onClick={() => {
+                            if (disp <= 0) {
+                              alert("Este tamanho está esgotado!");
+                              return;
+                            }
+                            setTamanhoSelecionadoTemp(tam);
+                            setQtdTamanhoTemp("1");
+                            setEtapaTamanhoModal("qtd");
+                          }}
+                          style={{
+                            padding: "10px",
+                            background: disp > 0 ? cores.bgCardSecundario : "#2a2a2a",
+                            color: disp > 0 ? cores.texto : "#666",
+                            border: `1px solid ${cores.borda}`,
+                            borderRadius: "6px",
+                            fontWeight: "bold",
+                            cursor: disp > 0 ? "pointer" : "not-allowed",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            fontSize: "13px"
+                          }}
+                        >
+                          <span>{tam}</span>
+                          <span style={{ color: "#28a745" }}>({disp} un)</span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button type="button" onClick={() => setModalTamanhoCarrinhoAberto(false)} style={{ flex: 1, padding: "10px", background: "#28a745", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "13px" }}>
+                    Concluir e Voltar (Enter)
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={confirmarQtdTamanhoModal}>
+                <div style={{ background: cores.bgCardSecundario, padding: "10px", borderRadius: "6px", marginBottom: "12px", fontSize: "13px" }}>
+                  Tamanho selecionado: <strong style={{ color: corModo }}>{tamanhoSelecionadoTemp}</strong> (Disp: {tamanhosDisponiveisTemp[tamanhoSelecionadoTemp]} un)
+                </div>
+                <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "6px" }}>Quantidade (Apenas números):</label>
+                <input 
+                  ref={inputQtdTamRef}
+                  type="text" 
+                  inputMode="numeric"
+                  className="input-animado"
+                  value={qtdTamanhoTemp}
+                  onChange={(e) => setQtdTamanhoTemp(e.target.value.replace(/\D/g, ""))}
+                  style={{ width: "100%", padding: "12px", background: cores.inputBg, border: `2px solid ${corModo}`, color: cores.texto, borderRadius: "6px", marginBottom: "15px", boxSizing: "border-box", outline: "none", fontSize: "18px", fontWeight: "bold", textAlign: "center" }}
+                  required
+                />
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button type="button" onClick={() => setEtapaTamanhoModal("lista")} style={{ flex: 1, padding: "10px", background: cores.bgCardSecundario, color: cores.texto, border: `1px solid ${cores.borda}`, borderRadius: "6px", cursor: "pointer", fontSize: "13px" }}>Voltar</button>
+                  <button type="submit" style={{ flex: 1, padding: "10px", background: corModo, color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "13px" }}>Adicionar (Enter)</button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
@@ -734,11 +1062,11 @@ export default function Pdv({
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
           <div style={{ background: cores.bgCard, padding: "25px", borderRadius: "8px", width: "400px", border: `1px solid ${cores.borda}` }}>
             <h3 style={{ margin: "0 0 10px 0" }}>🛍️ Mercadoria a Ver / Prova</h3>
-            <p style={{ color: cores.textoSecundario, fontSize: "13px", margin: "0 0 15px 0" }}>Atualiza o estoque, exibe no caixa com valor R$ 0,00 e registra o pedido.</p>
+            <p style={{ color: cores.textoSecundario, fontSize: "13px", margin: "0 0 15px 0" }}>Atualiza o estoque, exibe o valor no relatório e registra o pedido.</p>
 
             <form onSubmit={confirmarAVerEProsseguir}>
               <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Nome de quem pegou (Funcionário/Amigo/Cliente):</label>
+                <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Nome de quem pegou (Carlos / Jarbas / Lucas...):</label>
                 <input
                   ref={inputAVer1Ref}
                   type="text"
@@ -1100,7 +1428,7 @@ export default function Pdv({
               }}
             />
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", fontSize: "12px", color: cores.textoSuave, padding: "0 4px" }}>
-              <span>{termo.length === 0 ? "Com busca vazia: Use [1-4] ou [← / →] para modo, [Enter] para Finalizar, [Q] para preço" : "Navegue com setas ↑ ↓"}</span>
+              <span>{termo.length === 0 ? "Com busca vazia: Use [1-4] ou [← / →] para modo, [Enter] para Finalizar, [Q] para preço, [Shift] para tamanho" : "Navegue com setas ↑ ↓"}</span>
               <span>Pressione F1 para ver os atalhos</span>
             </div>
           </div>
@@ -1165,13 +1493,16 @@ export default function Pdv({
             </div>
 
             {carrinho.length === 0 ? (
-              <p style={{ color: cores.textoSuave, marginTop: "20px" }}>Nenhum item adicionado à venda.</p>
+              <p style={{ color: cores.textoSuave, marginTop: "20px" }}>Nenhum item adicionado à venda. (Pressione Shift para definir tamanho)</p>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "35vh", overflowY: "auto", margin: "15px 0" }}>
-                {carrinho.map((item) => (
+                {carrinho.map((item, idx) => (
                   <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${cores.bordaClara}`, paddingBottom: "8px" }}>
                     <div>
-                      <div>{item.nome}</div>
+                      <div><strong>{item.nome}</strong></div>
+                      <div style={{ fontSize: "12px", color: "#28a745", fontWeight: "bold" }}>
+                        Tamanho: {item.tamanhoSelecionado || "⚠️ Não definido (Pressione Shift)"}
+                      </div>
                       <div 
                         onClick={() => {
                           if (tipoTabela !== "a_ver") {
@@ -1187,7 +1518,10 @@ export default function Pdv({
                         {tipoTabela !== "a_ver" && <span style={{ fontSize: "10px", marginLeft: "5px", color: cores.textoSuave }}>(✏️ editar)</span>}
                       </div>
                     </div>
-                    <button onClick={() => removerDoCarrinho(item.id)} style={{ background: "#e53e3e", color: "#fff", border: "none", borderRadius: "4px", padding: "4px 8px", cursor: "pointer", fontSize: "12px" }}>✕</button>
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                      <button onClick={() => abrirModalTamanhoCarrinho(idx)} title="Definir Tamanho (Shift)" style={{ background: "#ffc107", color: "#000", border: "none", borderRadius: "6px", padding: "5px 8px", cursor: "pointer", fontSize: "11px", fontWeight: "bold" }}>👕 Tam</button>
+                      <button onClick={() => removerDoCarrinho(item.id)} style={{ background: "#e53e3e", color: "#fff", border: "none", borderRadius: "4px", padding: "4px 8px", cursor: "pointer", fontSize: "12px" }}>✕</button>
+                    </div>
                   </div>
                 ))}
               </div>
