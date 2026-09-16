@@ -14,9 +14,7 @@ export default function Relatorio({
   setUltimoFechamentoSalvo,
   totalHistoricoConsolidado,
   setTotalHistoricoConsolidado,
-  recarregarDados,
-  setDadosFechamentoPdf,
-  setDadosRecibo
+  recarregarDados
 }) {
   const isCompartilhado = usuarioLogado?.email && EMAILS_COMPARTILHADOS.includes(usuarioLogado.email);
   const lojaId = isCompartilhado ? "compartilhado_jarbas_lucas" : (usuarioLogado?.uid || "loja_padrao");
@@ -33,8 +31,9 @@ export default function Relatorio({
   const [salvandoEdicao, setSalvandoEdicao] = useState(false);
   const [processandoLimpeza, setProcessandoLimpeza] = useState(false);
 
-  // Estado local para gerenciar a impressão isolada do cupom a partir do relatório
+  // Estados locais para controle estrito de impressão isolada
   const [vendaReimprimirLocal, setVendaReimprimirLocal] = useState(null);
+  const [fechamentoLocalImprimir, setFechamentoLocalImprimir] = useState(null);
 
   const inputStyle = {
     width: "100%",
@@ -59,7 +58,6 @@ export default function Relatorio({
   let totalCartao = 0;
 
   vendasDoCaixaAtual.forEach(v => {
-    // Se for mercadoria a ver de Jarbas ou Lucas com flag de não computar no caixa, ignora da soma
     if (v.naoComputarNoCaixa) return;
     const valor = Number(v.total || 0);
     const pg = (v.formaPagamento || "").toLowerCase();
@@ -120,6 +118,7 @@ export default function Relatorio({
   }
 
   function reimprimirCupom(venda) {
+    setFechamentoLocalImprimir(null);
     setVendaReimprimirLocal(venda);
     setTimeout(() => {
       window.print();
@@ -166,7 +165,7 @@ export default function Relatorio({
 
     document.title = `fechamento_caixa_${dataHoje.replace(/\//g, '-')}`;
 
-    setDadosFechamentoPdf({
+    const dadosFechamento = {
       dataHoje,
       horaFechamento,
       trocoInicial: caixaAberto?.trocoInicial || 0,
@@ -177,7 +176,10 @@ export default function Relatorio({
       creditoHoje: 0,
       totalVendido: somaTotalCaixa,
       vendas: vendasDoCaixaAtual
-    });
+    };
+
+    setVendaReimprimirLocal(null);
+    setFechamentoLocalImprimir(dadosFechamento);
 
     try {
       const caixaRef = doc(db, "caixas", caixaAberto.id);
@@ -198,6 +200,7 @@ export default function Relatorio({
 
     setTimeout(() => {
       window.print();
+      setTimeout(() => setFechamentoLocalImprimir(null), 500);
     }, 300);
   }
 
@@ -241,6 +244,8 @@ export default function Relatorio({
         @media print {
           body * { visibility: hidden !important; }
           .print-recibo-local, .print-recibo-local * { visibility: visible !important; }
+          .print-fechamento-local, .print-fechamento-local * { visibility: visible !important; }
+
           .print-recibo-local { 
             display: block !important; 
             position: absolute; 
@@ -251,31 +256,45 @@ export default function Relatorio({
             color: #000 !important; 
             font-family: 'Courier New', Courier, monospace !important; 
             font-size: 11px !important;
+            font-weight: bold !important;
             padding: 4mm !important;
+          }
+
+          .print-fechamento-local {
+            display: block !important;
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100% !important;
+            background: #fff !important;
+            color: #000 !important;
+            font-family: Arial, sans-serif !important;
+            padding: 10mm !important;
           }
         }
         @media screen {
           .print-recibo-local { display: none; }
+          .print-fechamento-local { display: none; }
         }
       `}</style>
 
-      {/* MOLDE DE REIMPRESSÃO DE CUPOM ISOLADO */}
+      {/* 1. MOLDE DE REIMPRESSÃO DE CUPOM ISOLADO (80mm) */}
       {vendaReimprimirLocal && (
-        <div className="print-recibo-local">
+        <div className="print-recibo-local" style={{ color: "#000", background: "#fff", fontWeight: "bold" }}>
           <div style={{ textAlign: "center", marginBottom: "8px" }}>
-            <h2 style={{ margin: 0, fontSize: "14px", fontWeight: "bold" }}>LIFE SURF</h2>
-            <p style={{ margin: "2px 0", fontSize: "10px" }}>COMPROVANTE DE VENDA (REIMPRESSÃO)</p>
-            <p style={{ margin: "2px 0", fontSize: "9px" }}>Pedido: #{vendaReimprimirLocal.id.slice(-6).toUpperCase()}</p>
-            <p style={{ margin: "2px 0", fontSize: "9px" }}>{vendaReimprimirLocal.data?.toDate ? vendaReimprimirLocal.data.toDate().toLocaleString("pt-BR") : new Date().toLocaleString("pt-BR")}</p>
+            <h2 style={{ margin: 0, fontSize: "15px", fontWeight: "bold" }}>LIFE SURF</h2>
+            <p style={{ margin: "2px 0", fontSize: "11px" }}>COMPROVANTE DE VENDA (REIMPRESSÃO)</p>
+            <p style={{ margin: "2px 0", fontSize: "10px" }}>Pedido: #{vendaReimprimirLocal.id.slice(-6).toUpperCase()}</p>
+            <p style={{ margin: "2px 0", fontSize: "10px" }}>{vendaReimprimirLocal.data?.toDate ? vendaReimprimirLocal.data.toDate().toLocaleString("pt-BR") : new Date().toLocaleString("pt-BR")}</p>
           </div>
-          <div style={{ borderBottom: "1px dashed #000", margin: "6px 0" }}></div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "10px" }}>
+          <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "11px" }}>
             <span>ITEM / TAM / QTD x VL.UN</span>
             <span>TOTAL</span>
           </div>
-          <div style={{ borderBottom: "1px dashed #000", margin: "4px 0 6px 0" }}></div>
+          <div style={{ borderBottom: "1px solid #000", margin: "4px 0 6px 0" }}></div>
           {vendaReimprimirLocal.itens?.map((item, i) => (
-            <div key={i} style={{ marginBottom: "6px", fontSize: "10px" }}>
+            <div key={i} style={{ marginBottom: "6px", fontSize: "11px" }}>
               <div>{item.nome} {item.tamanhoSelecionado ? `[Tam: ${item.tamanhoSelecionado}]` : ""}</div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span>{item.quantidade}x R$ {Number(item.precoUnitario).toFixed(2)}</span>
@@ -284,27 +303,80 @@ export default function Relatorio({
             </div>
           ))}
           {vendaReimprimirLocal.infoTroca?.itemTrocado && (
-            <div style={{ fontSize: "9px", marginTop: "4px", borderTop: "1px dotted #000", paddingTop: "4px" }}>
+            <div style={{ fontSize: "10px", marginTop: "4px", borderTop: "1px solid #000", paddingTop: "4px" }}>
               <strong>Obs:</strong> {vendaReimprimirLocal.infoTroca.itemTrocado}
             </div>
           )}
-          <div style={{ borderBottom: "1px dashed #000", margin: "6px 0" }}></div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px" }}>
+          <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px" }}>
             <span>Subtotal:</span>
             <span>R$ {Number(vendaReimprimirLocal.subtotalBruto || vendaReimprimirLocal.total).toFixed(2)}</span>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "12px", marginTop: "4px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "13px", marginTop: "4px" }}>
             <span>TOTAL PAGO:</span>
             <span>R$ {Number(vendaReimprimirLocal.total || 0).toFixed(2)}</span>
           </div>
-          <div style={{ borderBottom: "1px dashed #000", margin: "6px 0" }}></div>
-          <div style={{ textAlign: "center", fontSize: "10px" }}>
+          <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
+          <div style={{ textAlign: "center", fontSize: "11px" }}>
             <p style={{ margin: "2px 0" }}>Forma: {vendaReimprimirLocal.formaPagamento}</p>
             <p style={{ margin: "2px 0" }}>Modo: {(vendaReimprimirLocal.tipoVenda || "varejo").toUpperCase()}</p>
           </div>
-          <div style={{ borderBottom: "1px dashed #000", margin: "6px 0" }}></div>
-          <div style={{ textAlign: "center", fontSize: "9px", marginTop: "8px" }}>
+          <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
+          <div style={{ textAlign: "center", fontSize: "10px", marginTop: "8px" }}>
             OBRIGADO PELA PREFERÊNCIA! VOLTE SEMPRE!
+          </div>
+        </div>
+      )}
+
+      {/* 2. MOLDE DE RELATÓRIO DE FECHAMENTO DE CAIXA COMPLETO (A4) */}
+      {fechamentoLocalImprimir && (
+        <div className="print-fechamento-local" style={{ color: "#000", background: "#fff" }}>
+          <div style={{ textAlign: "center", marginBottom: "25px", borderBottom: "2px solid #000", paddingBottom: "15px" }}>
+            <h2 style={{ margin: 0, fontSize: "20px", fontWeight: "bold" }}>LIFESURF - FECHAMENTO DE CAIXA DIÁRIO</h2>
+            <p style={{ margin: "6px 0 0 0", fontSize: "13px" }}>Data: <strong>{fechamentoLocalImprimir.dataHoje}</strong> | Fechamento: <strong>{fechamentoLocalImprimir.horaFechamento}</strong></p>
+          </div>
+          
+          <div style={{ display: "flex", justifyContent: "space-between", border: "1px solid #000", padding: "12px", marginBottom: "25px", fontSize: "12px", textAlign: "center", background: "#f9f9f9" }}>
+            <div>Fundo Troco: <br/><strong style={{ fontSize: "14px" }}>R$ {fechamentoLocalImprimir.trocoInicial.toFixed(2)}</strong></div>
+            <div>Vendas: <br/><strong style={{ fontSize: "14px" }}>{fechamentoLocalImprimir.qtdVendas}</strong></div>
+            <div>Dinheiro: <br/><strong style={{ fontSize: "14px" }}>R$ {fechamentoLocalImprimir.dinheiroHoje.toFixed(2)}</strong></div>
+            <div>Pix: <br/><strong style={{ fontSize: "14px" }}>R$ {fechamentoLocalImprimir.pixHoje.toFixed(2)}</strong></div>
+            <div>Cartões: <br/><strong style={{ fontSize: "14px" }}>R$ {fechamentoLocalImprimir.debitoHoje.toFixed(2)}</strong></div>
+            <div>TOTAL TURNO: <br/><strong style={{ fontSize: "15px", color: "#000" }}>R$ {fechamentoLocalImprimir.totalVendido.toFixed(2)}</strong></div>
+          </div>
+
+          <h4 style={{ fontSize: "15px", borderBottom: "1px solid #000", paddingBottom: "6px", marginBottom: "12px", fontWeight: "bold" }}>Vendas Registradas no Turno</h4>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px", marginBottom: "60px" }}>
+            <thead>
+              <tr style={{ borderBottom: "2px solid #000", textAlign: "left", background: "#eee" }}>
+                <th style={{ padding: "8px" }}>Hora</th>
+                <th style={{ padding: "8px" }}>Modo</th>
+                <th style={{ padding: "8px" }}>Itens</th>
+                <th style={{ padding: "8px" }}>Pagamento</th>
+                <th style={{ padding: "8px", textAlign: "right" }}>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {fechamentoLocalImprimir.vendas.map((v, i) => (
+                <tr key={i} style={{ borderBottom: "1px solid #ccc" }}>
+                  <td style={{ padding: "8px", whiteSpace: "nowrap" }}>{v.data?.toDate ? v.data.toDate().toLocaleTimeString("pt-BR") : "—"}</td>
+                  <td style={{ padding: "8px", fontWeight: "bold" }}>{(v.tipoVenda || "varejo").toUpperCase()}</td>
+                  <td style={{ padding: "8px" }}>
+                    {v.itens?.map((it, idx) => (
+                      <span key={idx} style={{ display: "block" }}>{it.quantidade}x {it.nome} {it.tamanhoSelecionado ? `[${it.tamanhoSelecionado}]` : ""}</span>
+                    ))}
+                    {v.infoTroca?.itemTrocado && <span style={{ display: "block", fontSize: "10px", fontStyle: "italic", color: "#333" }}>{v.infoTroca.itemTrocado}</span>}
+                  </td>
+                  <td style={{ padding: "8px" }}>{v.formaPagamento}</td>
+                  <td style={{ padding: "8px", textAlign: "right", fontWeight: "bold" }}>R$ {Number(v.total || 0).toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: "80px", fontSize: "13px" }}>
+            <div style={{ width: "40%", borderTop: "1px solid #000", textAlign: "center", paddingTop: "8px" }}>Assinatura do Caixa</div>
+            <div style={{ width: "40%", borderTop: "1px solid #000", textAlign: "center", paddingTop: "8px" }}>Conferência do Gerente</div>
           </div>
         </div>
       )}
@@ -388,9 +460,7 @@ export default function Relatorio({
                         <td style={{ padding: "10px" }}>{(v.tipoVenda || "varejo").toUpperCase()}</td>
                         <td style={{ padding: "10px" }}>
                           {v.itens?.map((it, idx) => (
-                            <span key={idx} style={{ display: "block", fontSize: "12px" }}>
-                              {it.quantidade}x {it.nome} {it.tamanhoSelecionado ? `[Tam: ${it.tamanhoSelecionado}]` : ""}
-                            </span>
+                            <span key={idx} style={{ display: "block", fontSize: "12px" }}>{it.quantidade}x {it.nome} {it.tamanhoSelecionado ? `[${it.tamanhoSelecionado}]` : ""}</span>
                           ))}
                           {v.infoTroca?.itemTrocado && (
                             <div style={{ marginTop: "4px", fontSize: "11px", color: v.tipoVenda === "a_ver" ? "#8e44ad" : "#ff9f43", fontWeight: "bold" }}>
@@ -401,7 +471,6 @@ export default function Relatorio({
                         <td style={{ padding: "10px" }}>{v.formaPagamento}</td>
                         <td style={{ padding: "10px", fontWeight: "bold", color: Number(v.total || 0) === 0 ? "#8e44ad" : cores.texto }}>
                           R$ {Number(v.total || 0).toFixed(2)}
-                          {v.naoComputarNoCaixa && <span style={{ display: "block", fontSize: "10px", color: "#8e44ad" }}>(Isolado do Caixa)</span>}
                         </td>
                         <td style={{ padding: "10px", textAlign: "center" }}>
                           <div style={{ display: "flex", justifyContent: "center", gap: "6px", flexWrap: "wrap" }}>
