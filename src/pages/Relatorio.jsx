@@ -118,15 +118,11 @@ export default function Relatorio({
   }
 
   function reimprimirCupom(venda) {
-    document.body.classList.add("modo-impressao-cupom");
     setFechamentoLocalImprimir(null);
     setVendaReimprimirLocal(venda);
     setTimeout(() => {
       window.print();
-      setTimeout(() => {
-        setVendaReimprimirLocal(null);
-        document.body.classList.remove("modo-impressao-cupom");
-      }, 500);
+      setTimeout(() => setVendaReimprimirLocal(null), 500);
     }, 300);
   }
 
@@ -182,7 +178,6 @@ export default function Relatorio({
       vendas: vendasDoCaixaAtual
     };
 
-    document.body.classList.add("modo-impressao-fechamento");
     setVendaReimprimirLocal(null);
     setFechamentoLocalImprimir(dadosFechamento);
 
@@ -205,10 +200,7 @@ export default function Relatorio({
 
     setTimeout(() => {
       window.print();
-      setTimeout(() => {
-        setFechamentoLocalImprimir(null);
-        document.body.classList.remove("modo-impressao-fechamento");
-      }, 500);
+      setTimeout(() => setFechamentoLocalImprimir(null), 500);
     }, 300);
   }
 
@@ -252,40 +244,27 @@ export default function Relatorio({
         @media print {
           body * { visibility: hidden !important; }
 
-          /* ESTILO EXCLUSIVO PARA O CUPOM TÉRMICO (80mm) */
-          body.modo-impressao-cupom @page {
-            size: 80mm auto;
-            margin: 0mm;
-          }
-          body.modo-impressao-cupom .print-recibo-local, 
-          body.modo-impressao-cupom .print-recibo-local * {
-            visibility: visible !important;
-          }
-          body.modo-impressao-cupom .print-recibo-local { 
+          /* CUPOM TÉRMICO VERTICAL (80mm) */
+          .print-recibo-local, .print-recibo-local * { visibility: visible !important; }
+          .print-recibo-local { 
             display: block !important; 
             position: absolute !important; 
             left: 0 !important; 
             top: 0 !important; 
-            width: 76mm !important; 
+            width: 72mm !important; 
             background: #fff !important; 
             color: #000 !important; 
             font-family: 'Courier New', Courier, monospace !important; 
-            font-size: 13px !important;
+            font-size: 12px !important;
             font-weight: bold !important;
             padding: 2mm !important;
             margin: 0 !important;
+            box-sizing: border-box !important;
           }
 
-          /* ESTILO EXCLUSIVO PARA O RELATÓRIO DE FECHAMENTO (A4) */
-          body.modo-impressao-fechamento @page {
-            size: A4 portrait;
-            margin: 10mm;
-          }
-          body.modo-impressao-fechamento .print-fechamento-local, 
-          body.modo-impressao-fechamento .print-fechamento-local * {
-            visibility: visible !important;
-          }
-          body.modo-impressao-fechamento .print-fechamento-local {
+          /* RELATÓRIO DE FECHAMENTO (A4) */
+          .print-fechamento-local, .print-fechamento-local * { visibility: visible !important; }
+          .print-fechamento-local {
             display: block !important;
             position: absolute !important;
             left: 0 !important;
@@ -294,7 +273,7 @@ export default function Relatorio({
             background: #fff !important;
             color: #000 !important;
             font-family: Arial, sans-serif !important;
-            padding: 0 !important;
+            padding: 10mm !important;
             box-sizing: border-box;
           }
         }
@@ -304,7 +283,7 @@ export default function Relatorio({
         }
       `}</style>
 
-      {/* 1. CUPOM TÉRMICO (80mm) */}
+      {/* 1. CUPOM TÉRMICO VERTICAL (80mm) */}
       {vendaReimprimirLocal && (
         <div className="print-recibo-local" style={{ color: "#000", background: "#fff", fontWeight: "bold" }}>
           <div style={{ textAlign: "center", marginBottom: "8px" }}>
