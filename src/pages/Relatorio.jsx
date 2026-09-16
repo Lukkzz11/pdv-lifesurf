@@ -117,67 +117,16 @@ export default function Relatorio({
     }
   }
 
-  // INJEÇÃO DINÂMICA DE CSS PARA GARANTIR O TAMANHO EXATO DA BOBINA TÉRMICA (80mm)
-  function injetarEstiloImpressao(tipo) {
-    const antigo = document.getElementById("dinamic-print-style");
-    if (antigo) antigo.remove();
-
-    const style = document.createElement("style");
-    style.id = "dinamic-print-style";
-
-    if (tipo === "recibo") {
-      style.innerHTML = `
-        @media print {
-          @page { size: 80mm auto; margin: 0mm; }
-          body * { visibility: hidden !important; }
-          .print-recibo-local, .print-recibo-local * { visibility: visible !important; }
-          .print-recibo-local { 
-            display: block !important; 
-            position: absolute !important; 
-            left: 0 !important; 
-            top: 0 !important; 
-            width: 76mm !important; 
-            background: #fff !important; 
-            color: #000 !important; 
-            font-family: 'Courier New', Courier, monospace !important; 
-            font-size: 13px !important;
-            font-weight: bold !important;
-            padding: 3mm !important;
-            margin: 0 !important;
-          }
-        }
-      `;
-    } else {
-      style.innerHTML = `
-        @media print {
-          @page { size: A4 portrait; margin: 10mm; }
-          body * { visibility: hidden !important; }
-          .print-fechamento-local, .print-fechamento-local * { visibility: visible !important; }
-          .print-fechamento-local {
-            display: block !important;
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            background: #fff !important;
-            color: #000 !important;
-            font-family: Arial, sans-serif !important;
-            padding: 0 !important;
-            box-sizing: border-box;
-          }
-        }
-      `;
-    }
-    document.head.appendChild(style);
-  }
-
   function reimprimirCupom(venda) {
-    injetarEstiloImpressao("recibo");
+    document.body.classList.add("modo-impressao-cupom");
     setFechamentoLocalImprimir(null);
     setVendaReimprimirLocal(venda);
     setTimeout(() => {
       window.print();
-      setTimeout(() => setVendaReimprimirLocal(null), 500);
+      setTimeout(() => {
+        setVendaReimprimirLocal(null);
+        document.body.classList.remove("modo-impressao-cupom");
+      }, 500);
     }, 300);
   }
 
@@ -233,7 +182,7 @@ export default function Relatorio({
       vendas: vendasDoCaixaAtual
     };
 
-    injetarEstiloImpressao("fechamento");
+    document.body.classList.add("modo-impressao-fechamento");
     setVendaReimprimirLocal(null);
     setFechamentoLocalImprimir(dadosFechamento);
 
@@ -256,7 +205,10 @@ export default function Relatorio({
 
     setTimeout(() => {
       window.print();
-      setTimeout(() => setFechamentoLocalImprimir(null), 500);
+      setTimeout(() => {
+        setFechamentoLocalImprimir(null);
+        document.body.classList.remove("modo-impressao-fechamento");
+      }, 500);
     }, 300);
   }
 
@@ -296,6 +248,62 @@ export default function Relatorio({
 
   return (
     <div style={{ width: "100%", boxSizing: "border-box" }}>
+      <style>{`
+        @media print {
+          body * { visibility: hidden !important; }
+
+          /* ESTILO EXCLUSIVO PARA O CUPOM TÉRMICO (80mm) */
+          body.modo-impressao-cupom @page {
+            size: 80mm auto;
+            margin: 0mm;
+          }
+          body.modo-impressao-cupom .print-recibo-local, 
+          body.modo-impressao-cupom .print-recibo-local * {
+            visibility: visible !important;
+          }
+          body.modo-impressao-cupom .print-recibo-local { 
+            display: block !important; 
+            position: absolute !important; 
+            left: 0 !important; 
+            top: 0 !important; 
+            width: 76mm !important; 
+            background: #fff !important; 
+            color: #000 !important; 
+            font-family: 'Courier New', Courier, monospace !important; 
+            font-size: 13px !important;
+            font-weight: bold !important;
+            padding: 2mm !important;
+            margin: 0 !important;
+          }
+
+          /* ESTILO EXCLUSIVO PARA O RELATÓRIO DE FECHAMENTO (A4) */
+          body.modo-impressao-fechamento @page {
+            size: A4 portrait;
+            margin: 10mm;
+          }
+          body.modo-impressao-fechamento .print-fechamento-local, 
+          body.modo-impressao-fechamento .print-fechamento-local * {
+            visibility: visible !important;
+          }
+          body.modo-impressao-fechamento .print-fechamento-local {
+            display: block !important;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            background: #fff !important;
+            color: #000 !important;
+            font-family: Arial, sans-serif !important;
+            padding: 0 !important;
+            box-sizing: border-box;
+          }
+        }
+        @media screen {
+          .print-recibo-local { display: none; }
+          .print-fechamento-local { display: none; }
+        }
+      `}</style>
+
       {/* 1. CUPOM TÉRMICO (80mm) */}
       {vendaReimprimirLocal && (
         <div className="print-recibo-local" style={{ color: "#000", background: "#fff", fontWeight: "bold" }}>
