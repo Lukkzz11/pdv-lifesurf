@@ -3,6 +3,7 @@ import Pdv from "./Pdv";
 import Estoque from "./Estoque";
 import Relatorio from "./Relatorio";
 import Configuracoes from "./Configuracoes";
+import A_ver from "./A_ver";
 
 export default function MenuPrincipal(props) {
   const { 
@@ -42,7 +43,7 @@ export default function MenuPrincipal(props) {
         }
       `}</style>
 
-      {/* CABEÇALHO DO MENU DE 4 CARDS */}
+      {/* CABEÇALHO DO MENU DE CARDS */}
       {telaAtiva === "menu" && (
         <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${cores.borda}`, paddingBottom: "15px", marginBottom: "20px", width: "100%" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -85,6 +86,7 @@ export default function MenuPrincipal(props) {
               {telaAtiva === "pdv" && "PDV"}
               {telaAtiva === "estoque" && "Produtos e Estoque"}
               {telaAtiva === "historico" && "Relatórios & Caixa"}
+              {telaAtiva === "a_ver" && "Mercadorias A Ver / Prova"}
               {telaAtiva === "config" && "Configurações"}
             </h1>
             {telaAtiva === "pdv" && (
@@ -120,32 +122,32 @@ export default function MenuPrincipal(props) {
         </header>
       )}
 
-      {/* TELA DE MENU PRINCIPAL (4 CARDS) */}
+      {/* TELA DE MENU PRINCIPAL (5 CARDS) */}
       {telaAtiva === "menu" && (
         <div style={{ width: "100%", padding: "40px 20px", boxSizing: "border-box", textAlign: "center" }}>
           <h1 style={{ marginBottom: "10px", color: cores.texto, fontSize: "28px" }}>Escolha uma Opção</h1>
           <p style={{ color: cores.textoSecundario, marginBottom: "40px", fontSize: "15px" }}>Gerencie sua frente de caixa, estoque e relatórios de forma isolada.</p>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "25px", width: "100%" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "25px", width: "100%" }}>
             
             <div 
               className="menu-card"
               onClick={() => setTelaAtiva("pdv")}
-              style={{ background: cores.bgCard, padding: "35px 20px", borderRadius: "12px", cursor: "pointer", border: `1px solid ${cores.borda}`, transition: "0.2s" }}
+              style={{ background: cores.bgCard, padding: "30px 20px", borderRadius: "12px", cursor: "pointer", border: `1px solid ${cores.borda}`, transition: "0.2s" }}
             >
-              <div style={{ fontSize: "40px", marginBottom: "12px" }}>🛒</div>
-              <h3 style={{ margin: "0 0 8px 0", color: cores.texto, fontSize: "18px" }}>Frente de Caixa (PDV)</h3>
-              <p style={{ fontSize: "13px", color: cores.textoSecundario, margin: 0 }}>Realizar vendas e emitir cupons</p>
+              <div style={{ fontSize: "36px", marginBottom: "10px" }}>🛒</div>
+              <h3 style={{ margin: "0 0 6px 0", color: cores.texto, fontSize: "17px" }}>Frente de Caixa (PDV)</h3>
+              <p style={{ fontSize: "12px", color: cores.textoSecundario, margin: 0 }}>Realizar vendas e cupons</p>
             </div>
 
             <div 
               className="menu-card"
               onClick={() => setTelaAtiva("estoque")}
-              style={{ background: cores.bgCard, padding: "35px 20px", borderRadius: "12px", cursor: "pointer", border: `1px solid ${cores.borda}`, transition: "0.2s" }}
+              style={{ background: cores.bgCard, padding: "30px 20px", borderRadius: "12px", cursor: "pointer", border: `1px solid ${cores.borda}`, transition: "0.2s" }}
             >
-              <div style={{ fontSize: "40px", marginBottom: "12px" }}>📦</div>
-              <h3 style={{ margin: "0 0 8px 0", color: cores.texto, fontSize: "18px" }}>Produtos e Estoque</h3>
-              <p style={{ fontSize: "13px", color: cores.textoSecundario, margin: 0 }}>Cadastrar e gerenciar produtos</p>
+              <div style={{ fontSize: "36px", marginBottom: "10px" }}>📦</div>
+              <h3 style={{ margin: "0 0 6px 0", color: cores.texto, fontSize: "17px" }}>Produtos e Estoque</h3>
+              <p style={{ fontSize: "12px", color: cores.textoSecundario, margin: 0 }}>Cadastrar e gerenciar produtos</p>
             </div>
 
             <div 
@@ -154,28 +156,38 @@ export default function MenuPrincipal(props) {
                 carregarDados();
                 setTelaAtiva("historico");
               }}
-              style={{ background: cores.bgCard, padding: "35px 20px", borderRadius: "12px", cursor: "pointer", border: `1px solid ${cores.borda}`, transition: "0.2s" }}
+              style={{ background: cores.bgCard, padding: "30px 20px", borderRadius: "12px", cursor: "pointer", border: `1px solid ${cores.borda}`, transition: "0.2s" }}
             >
-              <div style={{ fontSize: "40px", marginBottom: "12px" }}>📊</div>
-              <h3 style={{ margin: "0 0 8px 0", color: cores.texto, fontSize: "18px" }}>Relatórios & Caixa</h3>
-              <p style={{ fontSize: "13px", color: cores.textoSecundario, margin: 0 }}>Fechamento e histórico de vendas</p>
+              <div style={{ fontSize: "36px", marginBottom: "10px" }}>📊</div>
+              <h3 style={{ margin: "0 0 6px 0", color: cores.texto, fontSize: "17px" }}>Relatórios & Caixa</h3>
+              <p style={{ fontSize: "12px", color: cores.textoSecundario, margin: 0 }}>Fechamento e histórico de vendas</p>
+            </div>
+
+            <div 
+              className="menu-card"
+              onClick={() => setTelaAtiva("a_ver")}
+              style={{ background: cores.bgCard, padding: "30px 20px", borderRadius: "12px", cursor: "pointer", border: `1px solid ${cores.borda}`, transition: "0.2s" }}
+            >
+              <div style={{ fontSize: "36px", marginBottom: "10px" }}>🛍️</div>
+              <h3 style={{ margin: "0 0 6px 0", color: cores.texto, fontSize: "17px" }}>Mercadorias A Ver</h3>
+              <p style={{ fontSize: "12px", color: cores.textoSecundario, margin: 0 }}>Controle de provas e pagamentos</p>
             </div>
 
             <div 
               className="menu-card"
               onClick={() => setTelaAtiva("config")}
-              style={{ background: cores.bgCard, padding: "35px 20px", borderRadius: "12px", cursor: "pointer", border: `1px solid ${cores.borda}`, transition: "0.2s" }}
+              style={{ background: cores.bgCard, padding: "30px 20px", borderRadius: "12px", cursor: "pointer", border: `1px solid ${cores.borda}`, transition: "0.2s" }}
             >
-              <div style={{ fontSize: "40px", marginBottom: "12px" }}>⚙️</div>
-              <h3 style={{ margin: "0 0 8px 0", color: cores.texto, fontSize: "18px" }}>Configurações</h3>
-              <p style={{ fontSize: "13px", color: cores.textoSecundario, margin: 0 }}>Logo, cupom e dados da loja</p>
+              <div style={{ fontSize: "36px", marginBottom: "10px" }}>⚙️</div>
+              <h3 style={{ margin: "0 0 6px 0", color: cores.texto, fontSize: "17px" }}>Configurações</h3>
+              <p style={{ fontSize: "12px", color: cores.textoSecundario, margin: 0 }}>Logo, cupom e dados da loja</p>
             </div>
 
           </div>
         </div>
       )}
 
-      {/* RENDERIZAÇÃO DAS PÁGINAS REAIS */}
+      {/* RENDERIZAÇÃO DAS PÁGINAS */}
       {telaAtiva === "pdv" && (
         <Pdv
           produtos={produtos}
@@ -219,6 +231,14 @@ export default function MenuPrincipal(props) {
             setDadosRecibo(null);
             setDadosFechamentoPdf(dados);
           }}
+        />
+      )}
+
+      {telaAtiva === "a_ver" && (
+        <A_ver
+          cores={cores}
+          usuarioLogado={usuarioLogado}
+          voltarHome={() => setTelaAtiva("menu")}
         />
       )}
 
