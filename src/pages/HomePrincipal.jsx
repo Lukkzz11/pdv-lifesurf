@@ -1,9 +1,10 @@
 import { useState } from "react";
 import MenuPrincipal from "./MenuPrincipal";
 import EstoqueFabrica from "./EstoqueFabrica";
+import Clientes from "./Clientes";
 
 export default function HomePrincipal(props) {
-  const [telaAtual, setTelaAtual] = useState("home"); // "home" | "menuPrincipal" | "bi" | "fabrica"
+  const [telaAtual, setTelaAtual] = useState("home"); // "home" | "menuPrincipal" | "bi" | "fabrica" | "clientes"
   const [buscaModulo, setBuscaModulo] = useState("");
   const { cores, tema, alternarTema, handleLogout, usuarioLogado, vendas } = props;
 
@@ -13,6 +14,10 @@ export default function HomePrincipal(props) {
 
   if (telaAtual === "fabrica") {
     return <EstoqueFabrica {...props} voltarHome={() => setTelaAtual("home")} />;
+  }
+
+  if (telaAtual === "clientes") {
+    return <Clientes {...props} voltarHome={() => setTelaAtual("home")} />;
   }
 
   // Cálculo dos produtos mais vendidos para o BI
@@ -106,9 +111,16 @@ export default function HomePrincipal(props) {
       onClick: () => setTelaAtual("fabrica"), 
       icone: "🏭" 
     },
+    { 
+      id: "clientes", 
+      titulo: "Clientes", 
+      subtitulo: "Cadastro e histórico de clientes", 
+      ativo: true, 
+      onClick: () => setTelaAtual("clientes"), 
+      icone: "👥" 
+    },
     { id: "pedido_atacado", titulo: "Pedido Atacado", subtitulo: "Gerenciar pedidos em lote", icone: "📦", ativo: false },
     { id: "catalogos", titulo: "Catálogos Digitais", subtitulo: "Vitrine de produtos", icone: "🌐", ativo: false },
-    { id: "clientes", titulo: "Clientes", subtitulo: "Cadastro e histórico", icone: "👥", ativo: false },
     { id: "relatorios", titulo: "Relatórios Mensais", subtitulo: "Balanço de vendas", icone: "📊", ativo: false },
     { id: "produtos", titulo: "Gestão de Produtos", subtitulo: "Preços e inventário", icone: "🏷️", ativo: false },
     { id: "configuracoes", titulo: "Configurações", subtitulo: "Dados da loja e cupom", icone: "⚙️", ativo: false },
