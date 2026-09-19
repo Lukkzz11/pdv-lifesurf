@@ -116,10 +116,12 @@ export default function Pdv({
 
   const [modalAVerInfoAberto, setModalAVerInfoAberto] = useState(false);
   const [nomeResponsavelAVer, setNomeResponsavelAVer] = useState("");
+  const [telefoneAVer, setTelefoneAVer] = useState("");
   const [dataAVer, setDataAVer] = useState(new Date().toISOString().split("T")[0]);
   const [observacaoAVer, setObservacaoAVer] = useState("");
   const inputAVer1Ref = useRef(null);
   const inputAVer2Ref = useRef(null);
+  const inputAVerTelRef = useRef(null);
 
   const [modalDescontoAberto, setModalDescontoAberto] = useState(false);
   const [tipoDesconto, setTipoDesconto] = useState("reais");
@@ -197,13 +199,13 @@ export default function Pdv({
   }, [etapaTeclado]);
 
   useEffect(() => {
-    if (tipoTabela === "varejo" || tipoTabela === "atacado") {
+    if (tipoTabela === "varejo" || tipoTabela === "atacado" || tipoTabela === "a_ver") {
       setCarrinho((prev) =>
         prev.map((item) => {
           const prod = produtos.find((p) => p.id === item.id);
           const preco = prod
-            ? tipoTabela === "atacado"
-              ? Number(prod.precoAtacado || prod.precoVarejo || 0)
+            ? (tipoTabela === "atacado" || tipoTabela === "a_ver")
+              ? Number(prod.precoAtacado || prod.precoVarejo || prod.preco || 0)
               : Number(prod.precoVarejo || prod.preco || 0)
             : item.precoUnitario;
           return { ...item, precoUnitario: preco };
@@ -213,7 +215,7 @@ export default function Pdv({
   }, [tipoTabela, produtos]);
 
   function getPrecoAtual(produto, modoPreco = tipoTabela) {
-    if (modoPreco === "atacado") {
+    if (modoPreco === "atacado" || modoPreco === "a_ver") {
       return Number(produto.precoAtacado || produto.precoVarejo || produto.preco || 0);
     }
     return Number(produto.precoVarejo || produto.preco || 0);
@@ -249,7 +251,7 @@ export default function Pdv({
       return;
     }
 
-    const precoCobrado = tipoTabela === "a_ver" ? 0 : getPrecoAtual(produtoModal);
+    const precoCobrado = getPrecoAtual(produtoModal);
 
     if (itemExistente) {
       setCarrinho(
@@ -387,7 +389,7 @@ export default function Pdv({
     }
   }
 
-  const subtotalComDesconto = tipoTabela === "a_ver" ? 0 : Math.max(0, subtotalBruto - valorDescontoCalculado);
+  const subtotalComDesconto = tipoTabela === "a_ver" ? subtotalBruto : Math.max(0, subtotalBruto - valorDescontoCalculado);
   const formasPagamentoDisponiveis = FORMAS_PAGAMENTO;
 
   // ESC Universal (Voltar Etapa)
@@ -587,6 +589,7 @@ export default function Pdv({
 
     if (tipoTabela === "a_ver") {
       setNomeResponsavelAVer("");
+      setTelefoneAVer("");
       setDataAVer(new Date().toISOString().split("T")[0]);
       setObservacaoAVer("");
       setModalAVerInfoAberto(true);
@@ -840,8 +843,30 @@ export default function Pdv({
       const nomeLimpo = nomeResponsavelAVer.trim().toLowerCase();
       const isJarbasOuLucas = nomeLimpo === "jarbas" || nomeLimpo === "lucas" || nomeLimpo.includes("jarbas") || nomeLimpo.includes("lucas");
 
+      // Para Jarbas ou Lucas, o valor due/total é 0 (isento), para os demais clientes usa o subtotalBruto da tabela de atacado
       const valorFinalRegistro = isJarbasOuLucas ? 0 : subtotalBruto;
       const obsTexto = `Responsável: ${nomeResponsavelAVer.trim()} | Data: ${dataAVer} | Valor: R$ ${valorFinalRegistro.toFixed(2)} ${observacaoAVer ? `| Obs: ${observacaoAVer.trim()}` : ""}`;
+      const itensDescricaoStr = carrinho.map(i => `${i.quantidade}x ${i.nome} ${i.tamanhoSelecionado ? `(${i.tamanhoSelecionado})` : ""}`).join("; ");
+
+      const pedidoSalvo = {
+        tipo: "mercadoria_a_ver",
+        lojaId: lojaIdAtual,
+        cliente: nomeResponsavelAVer.trim(),
+        telefone: telefoneAVer.trim() || "",
+        itens: carrinho.map(i => ({ ...i, precoUnitario: isJarbasOuLucas ? 0 : i.precoUnitario })),
+        itensDescricao: itensDescricaoStr,
+        valorTotalMercadoria: valorFinalRegistro,
+        valorPago: 0,
+        status: "pendente_prova",
+        isJarbasOuLucas,
+        observacao: observacaoAVer.trim(),
+        dataRetirada: dataAVer,
+        data: serverTimestamp()
+      };
+
+      console.log("Pedido salvo pelo PDV:", pedidoSalvo);
+      console.log("lojaId usado:", lojaIdAtual);
+      console.log("tipo usado:", "mercadoria_a_ver");
 
       await runTransaction(db, async (transaction) => {
         const leituras = [];
@@ -902,19 +927,7 @@ export default function Pdv({
         });
 
         const pedidoRef = doc(collection(db, "pedidos"));
-        transaction.set(pedidoRef, {
-          lojaId: lojaIdAtual,
-          cliente: nomeResponsavelAVer.trim(),
-          tipo: "mercadoria_a_ver",
-          status: "pendente_prova",
-          isJarbasOuLucas,
-          valorTotalMercadoria: valorFinalRegistro,
-          dataRetirada: dataAVer,
-          itensDescricao: carrinho.map(i => `${i.quantidade}x ${i.nome} ${i.tamanhoSelecionado ? `(${i.tamanhoSelecionado})` : ""}`).join("; "),
-          observacao: observacaoAVer.trim(),
-          itens: carrinho.map(i => ({ ...i, precoUnitario: isJarbasOuLucas ? 0 : i.precoUnitario })),
-          data: serverTimestamp()
-        });
+        transaction.set(pedidoRef, pedidoSalvo);
       });
 
       alert(isJarbasOuLucas ? "Retirada registrada para Jarbas/Lucas (Isento/Isolado)!" : "Mercadoria a ver registrada com sucesso (Valor devido computado)!");
@@ -1132,14 +1145,14 @@ export default function Pdv({
             position: absolute !important; 
             left: 0 !important; 
             top: 0 !important; 
-            width: 80mm !important; 
+            width: 72mm !important; 
             background: #fff !important; 
             color: #000 !important; 
             font-family: 'Courier New', Courier, monospace !important; 
-            font-size: 13px !important;
+            font-size: 12px !important;
             font-weight: bold !important;
-            padding: 2mm !important;
-            margin: 0 !important;
+            padding: 1mm !important;
+            margin: 0 auto !important;
             box-sizing: border-box !important;
           }
         }
@@ -1157,30 +1170,25 @@ export default function Pdv({
         }
       `}</style>
 
-      {/* RECIBO TÉRMICO 80mm INTEGRADO COM CONFIGURAÇÕES DA LOJA */}
+      {/* RECIBO TÉRMICO 80mm SEM LOGO E COM LARGURA OTIMIZADA */}
       {dadosReciboLocal && (
         <div className="print-recibo">
-          <div style={{ textAlign: "center", marginBottom: "8px" }}>
-            {configLoja.logoUrl && (
-              <div style={{ marginBottom: "5px" }}>
-                <img src={configLoja.logoUrl} alt="Logo" style={{ maxHeight: "40px", maxWidth: "120px", objectFit: "contain", margin: "0 auto" }} />
-              </div>
-            )}
-            <h2 style={{ margin: 0, fontSize: "16px", fontWeight: "bold" }}>{configLoja.nomeLoja}</h2>
+          <div style={{ textAlign: "center", marginBottom: "6px" }}>
+            <h2 style={{ margin: 0, fontSize: "15px", fontWeight: "bold" }}>{configLoja.nomeLoja}</h2>
             {configLoja.endereco && <p style={{ margin: "2px 0", fontSize: "10px" }}>{configLoja.endereco}</p>}
             {configLoja.telefone && <p style={{ margin: "2px 0", fontSize: "10px" }}>Tel: {configLoja.telefone}</p>}
             <p style={{ margin: "4px 0 2px 0", fontSize: "11px" }}>COMPROVANTE DE VENDA</p>
             <p style={{ margin: "2px 0", fontSize: "10px" }}>Pedido: #{dadosReciboLocal.id}</p>
             <p style={{ margin: "2px 0", fontSize: "10px" }}>{dadosReciboLocal.dataHora}</p>
           </div>
-          <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
+          <div style={{ borderBottom: "1px solid #000", margin: "5px 0" }}></div>
           <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "11px" }}>
             <span>ITEM / TAM / QTD x VL.UN</span>
             <span>TOTAL</span>
           </div>
-          <div style={{ borderBottom: "1px solid #000", margin: "4px 0 6px 0" }}></div>
+          <div style={{ borderBottom: "1px solid #000", margin: "3px 0 5px 0" }}></div>
           {dadosReciboLocal.itens.map((item, i) => (
-            <div key={i} style={{ marginBottom: "6px", fontSize: "11px" }}>
+            <div key={i} style={{ marginBottom: "5px", fontSize: "11px" }}>
               <div>{item.nome} {item.tamanhoSelecionado ? `[Tam: ${item.tamanhoSelecionado}]` : ""}</div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span>{item.quantidade}x R$ {Number(item.precoUnitario).toFixed(2)}</span>
@@ -1193,7 +1201,7 @@ export default function Pdv({
               <strong>Obs/Troca:</strong> {dadosReciboLocal.infoTroca.itemTrocado}
             </div>
           )}
-          <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
+          <div style={{ borderBottom: "1px solid #000", margin: "5px 0" }}></div>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px" }}>
             <span>Subtotal:</span>
             <span>R$ {dadosReciboLocal.subtotalBruto.toFixed(2)}</span>
@@ -1204,17 +1212,17 @@ export default function Pdv({
               <span>- R$ {dadosReciboLocal.desconto.toFixed(2)}</span>
             </div>
           )}
-          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "13px", marginTop: "4px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "12px", marginTop: "4px" }}>
             <span>TOTAL PAGO:</span>
             <span>R$ {dadosReciboLocal.total.toFixed(2)}</span>
           </div>
-          <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
+          <div style={{ borderBottom: "1px solid #000", margin: "5px 0" }}></div>
           <div style={{ textAlign: "center", fontSize: "11px" }}>
             <p style={{ margin: "2px 0" }}>Forma: {dadosReciboLocal.formaPagamento}</p>
             <p style={{ margin: "2px 0" }}>Modo: {dadosReciboLocal.tipoVenda.toUpperCase()}</p>
           </div>
-          <div style={{ borderBottom: "1px solid #000", margin: "6px 0" }}></div>
-          <div style={{ textAlign: "center", fontSize: "10px", marginTop: "8px" }}>
+          <div style={{ borderBottom: "1px solid #000", margin: "5px 0" }}></div>
+          <div style={{ textAlign: "center", fontSize: "10px", marginTop: "6px" }}>
             {configLoja.mensagemRodape}
           </div>
         </div>
@@ -1566,9 +1574,22 @@ export default function Pdv({
                   placeholder=""
                   value={nomeResponsavelAVer}
                   onChange={(e) => setNomeResponsavelAVer(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); inputAVer2Ref.current?.focus(); } }}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); inputAVerTelRef.current?.focus(); } }}
                   style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }}
                   required
+                />
+              </div>
+
+              <div style={{ marginBottom: "12px" }}>
+                <label style={{ display: "block", fontSize: "12px", color: cores.textoSecundario, marginBottom: "4px" }}>Telefone de contato:</label>
+                <input
+                  ref={inputAVerTelRef}
+                  type="text"
+                  placeholder="(00) 00000-0000"
+                  value={telefoneAVer}
+                  onChange={(e) => setTelefoneAVer(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); inputAVer2Ref.current?.focus(); } }}
+                  style={{ width: "100%", padding: "10px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "6px", boxSizing: "border-box" }}
                 />
               </div>
 
@@ -1600,7 +1621,7 @@ export default function Pdv({
             <p style={{ color: cores.textoSecundario, fontSize: "14px", margin: "0 0 15px 0" }}>
               <strong style={{ color: cores.texto }}>{produtoModal.nome}</strong><br />
               <span style={{ color: corModo, fontWeight: "bold" }}>
-                R$ {tipoTabela === "a_ver" ? "0.00 (A Ver)" : `${getPrecoAtual(produtoModal).toFixed(2)} (${tipoTabela.toUpperCase()})`}
+                R$ {getPrecoAtual(produtoModal).toFixed(2)} ({tipoTabela.toUpperCase()})
               </span> | Estoque: {produtoModal.estoque} un {produtoModal.permiteNegativo ? "(Sem trava)" : ""}
             </p>
 
@@ -1928,7 +1949,7 @@ export default function Pdv({
                 <p style={{ color: cores.textoSuave, padding: "10px" }}>Nenhum produto com "{buscaPdv}".</p>
               ) : (
                 produtosFiltrados.map((p, idx) => {
-                  const precoCobrado = tipoTabela === "a_ver" ? 0 : getPrecoAtual(p);
+                  const precoCobrado = getPrecoAtual(p);
                   const focado = idx === indiceFocoBusca;
 
                   return (

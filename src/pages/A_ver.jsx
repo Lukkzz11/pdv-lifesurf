@@ -61,6 +61,11 @@ export default function A_ver({ cores, usuarioLogado, voltarHome }) {
       const snap = await getDocs(collection(db, "pedidos"));
       const lista = snap.docs.map(d => ({ id: d.id, ...d.data() }))
         .filter(p => p.tipo === "mercadoria_a_ver" && (!p.lojaId || p.lojaId === lojaIdAtual));
+      
+      // Log de depuração solicitado
+      console.log("Pedidos carregados na A_Ver:", lista);
+      console.log("lojaId usado na A_Ver:", lojaIdAtual);
+
       setPedidos(lista);
     } catch (err) {
       console.error("Erro ao carregar mercadorias a ver:", err);
@@ -329,7 +334,6 @@ export default function A_ver({ cores, usuarioLogado, voltarHome }) {
   async function salvarEdicaoItens() {
     if (!pedidoParaEditar || salvandoEdicao) return;
     
-    // Validar se alguma quantidade nova é maior que a original
     for (let i = 0; i < pedidoParaEditar.itens.length; i++) {
       const itemAntigo = pedidoParaEditar.itens[i];
       const itemNovo = itensEditadosTemp[i];
