@@ -1,668 +1,899 @@
 import { useState, useEffect } from "react";
-import { db } from "../firebase";
-import { 
-  collection, 
-  getDocs, 
-  addDoc, 
-  doc, 
-  updateDoc, 
-  deleteDoc, 
-  serverTimestamp,
-  increment 
-} from "firebase/firestore";
+import { useTenant } from "../contexts/TenantContext";
+import {
+  STATUS_OP,
+  STATUS_OP_CONFIG,
+  TIPOS_MATERIA_PRIMA,
+  fetchProductionOrders,
+  createProductionOrder,
+  updateProductionOrderStatus,
+  fetchRawMaterials,
+  saveRawMaterial,
+  fetchProductionWaste,
+  recordProductionWaste,
+  transferFinishedGoodsToStore
+} from "../services/productionService";
+import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/Card";
+import { Button } from "../components/ui/Button";
+import { Input } from "../components/ui/Input";
+import { Select } from "../components/ui/Select";
+import { Badge } from "../components/ui/Badge";
+import { Modal, ModalHeader, ModalBody, ModalFooter } from "../components/ui/Modal";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+  TableEmpty
+} from "../components/ui/Table";
+import { formatCurrency } from "../utils/formatters";
+import { cn } from "../utils/cn";
+import {
+  Factory,
+  Plus,
+  Search,
+  Scissors,
+  Layers,
+  Send,
+  ArrowRight,
+  Sparkles,
+  AlertTriangle,
+  Package,
+  CheckCircle2,
+  Trash2,
+  Clock,
+  Shirt,
+  Percent,
+  Check,
+  RotateCcw
+} from "lucide-react";
 
-const EMAILS_COMPARTILHADOS = ["jarbasantonio201@gmail.com", "lucasesilva438@gmail.com"];
-const LISTA_TAMANHOS = ["PP", "P", "M", "G", "GG", "EXG", "G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9", "G10"];
+export default function EstoqueFabrica() {
+  const { activeTenantId } = useTenant();
 
-// Funções auxiliares para manipular strings de tamanhos
-function parseTamanhos(str) {
-  const res = {};
-  if (!str || str === "Tamanho único") return res;
-  str.split(" | ").forEach(part => {
-    const [k, v] = part.split(":");
-    if (k && v) res[k.trim()] = parseInt(v.trim(), 10) || 0;
-  });
-  return res;
-}
+  const [abaAtiva, setAbaAtiva] = useState("ops"); // "ops" | "materia_prima" | "perdas" | "transferencia"
+  const [loading, setLoading] = useState(true);
 
-function serializeTamanhos(obj) {
-  const arr = [];
-  Object.keys(obj).forEach(k => {
-    if (obj[k] > 0) arr.push(`${k}: ${obj[k]}`);
-  });
-  return arr.length > 0 ? arr.join(" | ") : "Tamanho único";
-}
+  // Estados dos Dados
+  const [ordensProducao, setOrdensProducao] = useState([]);
+  const [materiasPrimas, setMateriasPrimas] = useState([]);
+  const [perdas, setPerdas] = useState([]);
 
-export default function EstoqueFabrica({ cores, usuarioLogado, voltarHome }) {
-  const [produtosFabrica, setProdutosFabrica] = useState([]);
-  const [carregando, setCarregando] = useState(true);
+  // Modais
+  const [modalNovaOpAberto, setModalNovaOpAberto] = useState(false);
+  const [modalNovoMaterialAberto, setModalNovoMaterialAberto] = useState(false);
+  const [modalNovaPerdaAberto, setModalNovaPerdaAberto] = useState(false);
+  const [modalTransferirAberto, setModalTransferirAberto] = useState(false);
 
-  // Formulário de Cadastro da Fábrica
-  const [nome, setNome] = useState("");
-  const [precoVarejo, setPrecoVarejo] = useState("");
-  const [precoAtacado, setPrecoAtacado] = useState("");
-  const [estoque, setEstoque] = useState("");
-  const [codigoBarras, setCodigoBarras] = useState("");
-  const [referencia, setReferencia] = useState("");
-  const [categoria, setCategoria] = useState("Camisa");
-  
-  // Estado dos Tamanhos (Cadastro)
-  const [modalTamanhosAberto, setModalTamanhosAberto] = useState(false);
-  const [tamanhosTemp, setTamanhosTemp] = useState({});
-  const [tamanhosSalvos, setTamanhosSalvos] = useState("");
+  // Formulário Nova OP
+  const [modeloOp, setModeloOp] = useState("");
+  const [referenciaOp, setReferenciaOp] = useState("");
+  const [categoriaOp, setCategoriaOp] = useState("Camiseta");
+  const [previsaoOp, setPrevisaoOp] = useState("");
+  const [tecidoOp, setTecidoOp] = useState("");
+  const [responsavelOp, setResponsavelOp] = useState("");
+  const [gradeOp, setGradeOp] = useState({ P: 20, M: 40, G: 40, GG: 20 });
+  const [salvandoOp, setSalvandoOp] = useState(false);
 
-  // Estados dos Modais de Envio para a Loja
-  const [modalSelecaoAberto, setModalSelecaoAberto] = useState(false);
-  const [modalListaSelecionadosAberto, setModalListaSelecionadosAberto] = useState(false);
-  const [itensSelecionados, setItensSelecionados] = useState({}); // { [id]: { qtdTotal, tamanhosStr, tamanhosObj, factoryRemainingObj } }
+  // Formulário Matéria-Prima
+  const [nomeMaterial, setNomeMaterial] = useState("");
+  const [tipoMaterial, setTipoMaterial] = useState("Tecido / Malha (Metros)");
+  const [unidadeMaterial, setUnidadeMaterial] = useState("metros");
+  const [estoqueAtualMaterial, setEstoqueAtualMaterial] = useState("");
+  const [estoqueMinMaterial, setEstoqueMinMaterial] = useState("15");
+  const [custoMaterial, setCustoMaterial] = useState("");
+  const [fornecedorMaterial, setFornecedorMaterial] = useState("");
+  const [salvandoMaterial, setSalvandoMaterial] = useState(false);
 
-  // Estado do Modal de Tamanhos para Envio Específico
-  const [modalEnvioTamanhosAberto, setModalEnvioTamanhosAberto] = useState(false);
-  const [itemEditandoEnvioId, setItemEditandoEnvioId] = useState(null);
-  const [tamanhosEnvioTemp, setTamanhosEnvioTemp] = useState({});
-  const [fabricaDisponivelAtual, setFabricaDisponivelAtual] = useState({});
+  // Formulário Perda
+  const [opPerda, setOpPerda] = useState("Geral");
+  const [motivoPerda, setMotivoPerda] = useState("falha_corte");
+  const [materialPerda, setMaterialPerda] = useState("");
+  const [qtdPerda, setQtdPerda] = useState("");
+  const [custoPerda, setCustoPerda] = useState("");
+  const [obsPerda, setObsPerda] = useState("");
+  const [salvandoPerda, setSalvandoPerda] = useState(false);
 
-  const isCompartilhado = usuarioLogado?.email && EMAILS_COMPARTILHADOS.includes(usuarioLogado.email);
-  const lojaIdAtual = isCompartilhado ? "compartilhado_jarbas_lucas" : (usuarioLogado?.uid || "loja_padrao");
+  // Formulário Transferência para Loja
+  const [opParaTransferir, setOpParaTransferir] = useState(null);
+  const [gradeTransferir, setGradeTransferir] = useState({});
+  const [transferindo, setTransferindo] = useState(false);
 
-  async function carregarEstoqueFabrica() {
+  // Carregar dados
+  const carregarDadosFabrica = async () => {
+    if (!activeTenantId) return;
+    setLoading(true);
     try {
-      const snap = await getDocs(collection(db, "estoque_fabrica"));
-      const lista = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setProdutosFabrica(lista.filter(p => !p.lojaId || p.lojaId === lojaIdAtual));
-    } catch (err) {
-      console.error("Erro ao carregar estoque da fábrica:", err);
+      const [ops, mats, pds] = await Promise.all([
+        fetchProductionOrders(activeTenantId),
+        fetchRawMaterials(activeTenantId),
+        fetchProductionWaste(activeTenantId)
+      ]);
+      setOrdensProducao(ops);
+      setMateriasPrimas(mats);
+      setPerdas(pds);
     } finally {
-      setCarregando(false);
+      setLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
-    carregarEstoqueFabrica();
-  }, []);
+    carregarDadosFabrica();
+  }, [activeTenantId]);
 
-  function abrirModalTamanhos() {
-    const inicial = {};
-    LISTA_TAMANHOS.forEach(t => {
-      inicial[t] = tamanhosTemp[t] !== undefined ? tamanhosTemp[t] : "";
-    });
-    setTamanhosTemp(inicial);
-    setModalTamanhosAberto(true);
-  }
+  // Ações de OP
+  const handleAvancarEstagioOp = async (op) => {
+    const estagios = [
+      STATUS_OP.PLANEJAMENTO,
+      STATUS_OP.CORTE,
+      STATUS_OP.COSTURA,
+      STATUS_OP.ESTAMPA,
+      STATUS_OP.ACABAMENTO,
+      STATUS_OP.CONCLUIDO
+    ];
+    const idx = estagios.indexOf(op.status);
+    if (idx >= 0 && idx < estagios.length - 1) {
+      const proximo = estagios[idx + 1];
+      setOrdensProducao((prev) =>
+        prev.map((o) => (o.id === op.id ? { ...o, status: proximo } : o))
+      );
+      await updateProductionOrderStatus(activeTenantId, op.id, proximo);
+    }
+  };
 
-  function salvarTamanhosModal() {
-    let somaTotal = 0;
-    const descricoes = [];
-
-    Object.keys(tamanhosTemp).forEach(t => {
-      const qtd = parseInt(tamanhosTemp[t], 10) || 0;
-      if (qtd > 0) {
-        somaTotal += qtd;
-        descricoes.push(`${t}: ${qtd}`);
-      }
-    });
-
-    const stringResumo = descricoes.join(" | ");
-    setTamanhosSalvos(stringResumo);
-    setEstoque(somaTotal > 0 ? somaTotal.toString() : "");
-    setModalTamanhosAberto(false);
-  }
-
-  // Abertura do Modal de Tamanhos na hora de Enviar para a Loja
-  function abrirModalEnvioTamanhos(prodId) {
-    const prod = produtosFabrica.find(p => p.id === prodId);
-    if (!prod) return;
-
-    setItemEditandoEnvioId(prodId);
-    const disponivel = parseTamanhos(prod.tamanhos);
-    setFabricaDisponivelAtual(disponivel);
-
-    const salvoAnterior = itensSelecionados[prodId]?.tamanhosObj || {};
-    const inicial = {};
-    Object.keys(disponivel).forEach(t => {
-      inicial[t] = salvoAnterior[t] !== undefined ? salvoAnterior[t] : "";
-    });
-    setTamanhosEnvioTemp(inicial);
-    setModalEnvioTamanhosAberto(true);
-  }
-
-  function salvarTamanhosEnvioModal() {
-    let somaTotal = 0;
-    const descricoes = [];
-    const objTamanhosEnvio = {};
-    const factoryRemaining = { ...fabricaDisponivelAtual };
-
-    let erroExcesso = false;
-
-    Object.keys(tamanhosEnvioTemp).forEach(t => {
-      const qtdEnviada = parseInt(tamanhosEnvioTemp[t], 10) || 0;
-      const qtdDisponivel = fabricaDisponivelAtual[t] || 0;
-
-      if (qtdEnviada > qtdDisponivel) {
-        alert(`Você digitou ${qtdEnviada} para o tamanho ${t}, mas na fábrica há apenas ${qtdDisponivel} disponíveis!`);
-        erroExcesso = true;
-        return;
-      }
-
-      if (qtdEnviada > 0) {
-        somaTotal += qtdEnviada;
-        descricoes.push(`${t}: ${qtdEnviada}`);
-        objTamanhosEnvio[t] = qtdEnviada;
-        factoryRemaining[t] = qtdDisponivel - qtdEnviada;
-      }
-    });
-
-    if (erroExcesso) return;
-
-    const stringResumo = descricoes.join(" | ");
-
-    setItensSelecionados(prev => ({
-      ...prev,
-      [itemEditandoEnvioId]: {
-        qtdTotal: somaTotal,
-        tamanhosStr: stringResumo || "Lote geral",
-        tamanhosObj: objTamanhosEnvio,
-        factoryRemainingObj: factoryRemaining
-      }
-    }));
-
-    setModalEnvioTamanhosAberto(false);
-  }
-
-  async function handleSalvarProdutoFabrica(e) {
+  const handleCriarOp = async (e) => {
     e.preventDefault();
-    if (!nome.trim() || !precoVarejo || !estoque) {
-      alert("Preencha Nome, Preço Varejo e defina os Tamanhos (Estoque).");
-      return;
-    }
+    if (!modeloOp.trim()) return;
 
+    setSalvandoOp(true);
     try {
-      const dados = {
-        nome: nome.trim(),
-        precoVarejo: parseFloat(precoVarejo),
-        precoAtacado: precoAtacado ? parseFloat(precoAtacado) : parseFloat(precoVarejo),
-        estoque: parseInt(estoque, 10),
-        codigoBarras: codigoBarras.trim() || null,
-        referencia: referencia.trim() || null,
-        categoria,
-        tamanhos: tamanhosSalvos || "Tamanho único",
-        lojaId: lojaIdAtual,
-        criadoEm: serverTimestamp()
-      };
+      const nova = await createProductionOrder(activeTenantId, {
+        modelo: modeloOp.trim(),
+        referencia: referenciaOp.trim(),
+        categoria: categoriaOp,
+        previsaoTermino: previsaoOp,
+        tecidoUtilizado: tecidoOp,
+        responsavel: responsavelOp,
+        gradePlanejada: gradeOp,
+        custoEstimadoPeca: 24.50
+      });
 
-      await addDoc(collection(db, "estoque_fabrica"), dados);
-      alert("Produto cadastrado na fábrica!");
-      setNome("");
-      setPrecoVarejo("");
-      setPrecoAtacado("");
-      setEstoque("");
-      setCodigoBarras("");
-      setReferencia("");
-      setTamanhosSalvos("");
-      setTamanhosTemp({});
-      carregarEstoqueFabrica();
-    } catch (err) {
-      alert("Erro ao salvar: " + err.message);
+      setOrdensProducao((prev) => [nova, ...prev]);
+      setModalNovaOpAberto(false);
+      setModeloOp("");
+      setReferenciaOp("");
+      setPrevisaoOp("");
+    } finally {
+      setSalvandoOp(false);
     }
-  }
+  };
 
-  async function handleExcluir(id) {
-    if (!confirm("Deseja excluir este item da fábrica?")) return;
+  const handleSalvarMaterial = async (e) => {
+    e.preventDefault();
+    if (!nomeMaterial.trim()) return;
+
+    setSalvandoMaterial(true);
     try {
-      await deleteDoc(doc(db, "estoque_fabrica", id));
-      carregarEstoqueFabrica();
-    } catch (err) {
-      alert("Erro ao excluir: " + err.message);
+      const novo = await saveRawMaterial(activeTenantId, {
+        nome: nomeMaterial.trim(),
+        tipo: tipoMaterial,
+        unidade: unidadeMaterial,
+        estoqueAtual: Number(estoqueAtualMaterial) || 0,
+        estoqueMinimo: Number(estoqueMinMaterial) || 10,
+        custoUnitario: Number(custoMaterial) || 0,
+        fornecedor: fornecedorMaterial.trim()
+      });
+
+      setMateriasPrimas((prev) => [novo, ...prev]);
+      setModalNovoMaterialAberto(false);
+      setNomeMaterial("");
+      setEstoqueAtualMaterial("");
+      setCustoMaterial("");
+    } finally {
+      setSalvandoMaterial(false);
     }
-  }
+  };
 
-  async function enviarParaLoja() {
-    const idsParaEnviar = Object.keys(itensSelecionados).filter(id => itensSelecionados[id]?.qtdTotal > 0);
-    if (idsParaEnviar.length === 0) {
-      alert("Selecione ao menos um produto e defina os tamanhos/quantidade a enviar!");
-      return;
-    }
+  const handleSalvarPerda = async (e) => {
+    e.preventDefault();
+    if (!qtdPerda) return;
 
-    if (!confirm("Tem certeza que deseja enviar essas mercadorias para o estoque da loja?")) return;
-
+    setSalvandoPerda(true);
     try {
-      for (const id of idsParaEnviar) {
-        const dadosEnvio = itensSelecionados[id];
-        const qtdEnviada = dadosEnvio.qtdTotal;
-        const prodFabrica = produtosFabrica.find(p => p.id === id);
+      const nova = await recordProductionWaste(activeTenantId, {
+        opCodigo: opPerda,
+        motivo: motivoPerda,
+        materialNome: materialPerda || "Tecido em Corte",
+        quantidade: Number(qtdPerda),
+        custoEstimadoPerda: Number(custoPerda) || 0,
+        observacao: obsPerda
+      });
 
-        if (!prodFabrica) continue;
-
-        if (prodFabrica.estoque < qtdEnviada) {
-          alert(`Estoque insuficiente na fábrica para o produto: ${prodFabrica.nome}`);
-          return;
-        }
-
-        // Atualiza a fábrica com o novo estoque total e os tamanhos restantes recalculados
-        const refFabrica = doc(db, "estoque_fabrica", id);
-        const novoEstoqueFabrica = prodFabrica.estoque - qtdEnviada;
-        const novoTamanhosFabricaStr = serializeTamanhos(dadosEnvio.factoryRemainingObj);
-
-        await updateDoc(refFabrica, {
-          estoque: novoEstoqueFabrica,
-          tamanhos: novoTamanhosFabricaStr
-        });
-
-        // Adiciona ou soma no estoque da Loja
-        const produtosLojaSnap = await getDocs(collection(db, "produtos"));
-        const produtoLojaExistente = produtosLojaSnap.docs
-          .map(d => ({ id: d.id, ...d.data() }))
-          .find(p => p.nome.toLowerCase() === prodFabrica.nome.toLowerCase() && (!p.lojaId || p.lojaId === lojaIdAtual));
-
-        if (produtoLojaExistente) {
-          const refLoja = doc(db, "produtos", produtoLojaExistente.id);
-          await updateDoc(refLoja, {
-            estoque: increment(qtdEnviada),
-            tamanhos: dadosEnvio.tamanhosStr || produtoLojaExistente.tamanhos
-          });
-        } else {
-          await addDoc(collection(db, "produtos"), {
-            nome: prodFabrica.nome,
-            precoVarejo: prodFabrica.precoVarejo,
-            precoAtacado: prodFabrica.precoAtacado,
-            estoque: qtdEnviada,
-            codigoBarras: prodFabrica.codigoBarras,
-            referencia: prodFabrica.referencia,
-            categoria: prodFabrica.categoria,
-            tamanhos: dadosEnvio.tamanhosStr || "Tamanho único",
-            lojaId: lojaIdAtual,
-            criadoEm: serverTimestamp()
-          });
-        }
-      }
-
-      alert("Mercadorias enviadas para o estoque da loja com sucesso!");
-      setItensSelecionados({});
-      setModalListaSelecionadosAberto(false);
-      setModalSelecaoAberto(false);
-      carregarEstoqueFabrica();
-    } catch (err) {
-      alert("Erro ao enviar mercadorias: " + err.message);
+      setPerdas((prev) => [nova, ...prev]);
+      setModalNovaPerdaAberto(false);
+      setQtdPerda("");
+      setCustoPerda("");
+      setObsPerda("");
+    } finally {
+      setSalvandoPerda(false);
     }
-  }
+  };
 
-  function emitirRelatorioPdf() {
-    if (produtosFabrica.length === 0) {
-      alert("Nenhum produto na fábrica para gerar o relatório!");
-      return;
+  const abrirModalTransferencia = (op) => {
+    setOpParaTransferir(op);
+    setGradeTransferir(op.gradePlanejada || { P: 10, M: 20, G: 20, GG: 10 });
+    setModalTransferirAberto(true);
+  };
+
+  const handleConfirmarTransferencia = async () => {
+    if (!opParaTransferir) return;
+
+    setTransferindo(true);
+    try {
+      await transferFinishedGoodsToStore(activeTenantId, {
+        nome: opParaTransferir.modelo,
+        referencia: opParaTransferir.referencia,
+        categoria: opParaTransferir.categoria,
+        gradeTransferir,
+        precoVarejo: 89.90,
+        precoAtacado: 59.90
+      });
+
+      // Atualiza OP para concluído
+      await updateProductionOrderStatus(activeTenantId, opParaTransferir.id, STATUS_OP.CONCLUIDO);
+      setOrdensProducao((prev) =>
+        prev.map((o) => (o.id === opParaTransferir.id ? { ...o, status: STATUS_OP.CONCLUIDO } : o))
+      );
+
+      setModalTransferirAberto(false);
+      alert("Lote transferido com sucesso para a loja! As peças já estão no balcão de vendas.");
+    } finally {
+      setTransferindo(false);
     }
-    window.print();
-  }
-
-  const inputStyle = {
-    width: "100%",
-    padding: "10px",
-    background: "transparent",
-    border: `1px solid ${cores.borda}`,
-    color: cores.texto,
-    borderRadius: "6px",
-    boxSizing: "border-box",
-    fontSize: "13px"
   };
 
   return (
-    <div style={{ width: "100%", minHeight: "100vh", padding: "15px", boxSizing: "border-box", fontFamily: "sans-serif", background: cores.bgGeral, color: cores.texto }}>
-      
-      <style>{`
-        @media print {
-          body { background: #fff !important; color: #000 !important; }
-          .no-print { display: none !important; }
-          .print-fabrica { display: block !important; width: 100% !important; font-family: Arial, sans-serif; color: #000; }
-        }
-        @media screen {
-          .print-fabrica { display: none; }
-        }
-      `}</style>
-
-      {/* ÁREA DE IMPRESSÃO PDF */}
-      <div className="print-fabrica" style={{ padding: "20px" }}>
-        <h1 style={{ fontSize: "20px", borderBottom: "2px solid #000", paddingBottom: "10px" }}>RELATÓRIO - ESTOQUE DA FÁBRICA</h1>
-        <p style={{ fontSize: "12px" }}>Emitido em: {new Date().toLocaleString("pt-BR")}</p>
-        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: "15px", fontSize: "11px" }}>
-          <thead>
-            <tr style={{ background: "#f0f0f0", borderBottom: "2px solid #000" }}>
-              <th style={{ padding: "6px", textAlign: "left" }}>Produto</th>
-              <th style={{ padding: "6px", textAlign: "left" }}>Ref</th>
-              <th style={{ padding: "6px", textAlign: "left" }}>Tamanhos</th>
-              <th style={{ padding: "6px", textAlign: "right" }}>Varejo</th>
-              <th style={{ padding: "6px", textAlign: "center" }}>Estoque</th>
-            </tr>
-          </thead>
-          <tbody>
-            {produtosFabrica.map(p => (
-              <tr key={p.id} style={{ borderBottom: "1px solid #ddd" }}>
-                <td style={{ padding: "6px" }}><strong>{p.nome}</strong></td>
-                <td style={{ padding: "6px" }}>{p.referencia || "—"}</td>
-                <td style={{ padding: "6px" }}>{p.tamanhos || "—"}</td>
-                <td style={{ padding: "6px", textAlign: "right" }}>R$ {Number(p.precoVarejo || 0).toFixed(2)}</td>
-                <td style={{ padding: "6px", textAlign: "center", fontWeight: "bold" }}>{p.estoque} un</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="no-print">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", borderBottom: `1px solid ${cores.borda}`, paddingBottom: "15px", flexWrap: "wrap", gap: "10px" }}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: "20px" }}>🏭 Estoque da Fábrica & Produção</h1>
-            <span style={{ fontSize: "12px", color: cores.textoSecundario }}>Gerencie a fabricação e envie lotes para a loja.</span>
+    <div className="space-y-6 animate-in fade-in duration-200">
+      {/* Cabeçalho de Fábrica */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Badge variant="warning" size="sm" withDot={true}>
+              Fábrica & Produção Ativa
+            </Badge>
+            <span className="text-xs text-slate-400">
+              Confecção, matérias-primas e Ordens de Produção
+            </span>
           </div>
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            <button onClick={emitirRelatorioPdf} style={{ background: "#17a2b8", color: "#fff", border: "none", padding: "8px 14px", borderRadius: "6px", cursor: "pointer", fontWeight: "bold", fontSize: "12px" }}>
-              🖨️ Salvar PDF
-            </button>
-            {voltarHome && (
-              <button onClick={voltarHome} style={{ background: "#6c757d", color: "#fff", border: "none", padding: "8px 14px", borderRadius: "6px", cursor: "pointer", fontWeight: "bold", fontSize: "12px" }}>
-                🏠 Início
-              </button>
-            )}
-          </div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+            Gestão de Produção & Fábrica
+          </h1>
+          <p className="text-xs text-slate-400">
+            Acompanhe o corte, costura, estampas e envie lotes prontos direto para o estoque da loja.
+          </p>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "20px" }}>
-          <button
-            onClick={() => setModalSelecaoAberto(true)}
-            style={{ width: "100%", maxWidth: "350px", background: "#28a745", color: "#fff", border: "none", padding: "12px 16px", borderRadius: "8px", fontWeight: "bold", fontSize: "14px", cursor: "pointer", boxShadow: "0 4px 12px rgba(40,167,69,0.3)" }}
-          >
-            📦 Retirar Mercadoria (Enviar para Loja)
-          </button>
-        </div>
-
-        <form onSubmit={handleSalvarProdutoFabrica} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "12px", marginBottom: "30px", background: cores.bgCard, padding: "15px", borderRadius: "10px", border: `1px solid ${cores.borda}` }}>
-          <h3 style={{ gridColumn: "1 / -1", margin: "0 0 5px 0", fontSize: "15px" }}>Cadastrar Novo Produto na Fábrica</h3>
-          <div>
-            <label style={{ display: "block", fontSize: "11px", marginBottom: "4px", color: cores.textoSecundario }}>Nome *</label>
-            <input type="text" placeholder="Ex: Short" value={nome} onChange={e => setNome(e.target.value)} style={inputStyle} required />
-          </div>
-          <div>
-            <label style={{ display: "block", fontSize: "11px", marginBottom: "4px", color: cores.textoSecundario }}>Preço Varejo *</label>
-            <input type="number" step="0.01" placeholder="50.00" value={precoVarejo} onChange={e => setPrecoVarejo(e.target.value)} style={inputStyle} required />
-          </div>
-          <div>
-            <label style={{ display: "block", fontSize: "11px", marginBottom: "4px", color: cores.textoSecundario }}>Preço Atacado</label>
-            <input type="number" step="0.01" placeholder="40.00" value={precoAtacado} onChange={e => setPrecoAtacado(e.target.value)} style={inputStyle} />
-          </div>
-          <div>
-            <label style={{ display: "block", fontSize: "11px", marginBottom: "4px", color: cores.textoSecundario }}>Estoque Total (Auto)</label>
-            <input type="text" placeholder="Defina os tamanhos" value={estoque} readOnly style={{ ...inputStyle, background: cores.bgCardSecundario, cursor: "not-allowed", fontWeight: "bold", color: "#28a745" }} required />
-          </div>
-          <div>
-            <label style={{ display: "block", fontSize: "11px", marginBottom: "4px", color: cores.textoSecundario }}>Ref</label>
-            <input type="text" placeholder="1460" value={referencia} onChange={e => setReferencia(e.target.value)} style={inputStyle} />
-          </div>
-
-          <div>
-            <label style={{ display: "block", fontSize: "11px", marginBottom: "4px", color: cores.textoSecundario }}>Gerenciar Tamanhos</label>
-            <button type="button" onClick={abrirModalTamanhos} style={{ width: "100%", padding: "10px", background: "#ffc107", color: "#000", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "12px" }}>
-              👕 {tamanhosSalvos ? "Editar Tamanhos" : "Definir Tamanhos"}
-            </button>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "flex-end" }}>
-            <button type="submit" style={{ width: "100%", padding: "11px", background: "#007bff", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}>
-              + Cadastrar
-            </button>
-          </div>
-
-          {tamanhosSalvos && (
-            <div style={{ gridColumn: "1 / -1", fontSize: "12px", color: "#28a745", fontWeight: "bold" }}>
-              Tamanhos definidos: {tamanhosSalvos}
-            </div>
+        {/* Botão de Ação Primária dependendo da aba */}
+        <div className="flex items-center gap-2">
+          {abaAtiva === "ops" && (
+            <Button
+              variant="primary"
+              onClick={() => setModalNovaOpAberto(true)}
+              leftIcon={<Plus className="w-4 h-4" />}
+            >
+              Nova Ordem de Produção (OP)
+            </Button>
           )}
-        </form>
-
-        <h3 style={{ marginBottom: "15px", fontSize: "16px" }}>Produtos Cadastrados na Fábrica</h3>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", minWidth: "600px" }}>
-            <thead>
-              <tr style={{ borderBottom: `2px solid ${cores.borda}`, color: cores.textoSecundario, fontSize: "12px" }}>
-                <th style={{ padding: "10px" }}>Nome</th>
-                <th style={{ padding: "10px" }}>Ref</th>
-                <th style={{ padding: "10px" }}>Tamanhos / Distribuição</th>
-                <th style={{ padding: "10px" }}>Varejo</th>
-                <th style={{ padding: "10px" }}>Atacado</th>
-                <th style={{ padding: "10px" }}>Estoque</th>
-                <th style={{ padding: "10px", textAlign: "center" }}>Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {produtosFabrica.length === 0 ? (
-                <tr><td colSpan="7" style={{ padding: "20px", textAlign: "center", color: cores.textoSecundario }}>Nenhum produto cadastrado na fábrica ainda.</td></tr>
-              ) : (
-                produtosFabrica.map(p => (
-                  <tr key={p.id} style={{ borderBottom: `1px solid ${cores.borda}`, fontSize: "13px" }}>
-                    <td style={{ padding: "10px", fontWeight: "bold" }}>{p.nome}</td>
-                    <td style={{ padding: "10px", color: cores.textoSecundario }}>{p.referencia || "—"}</td>
-                    <td style={{ padding: "10px", fontSize: "11px", color: cores.textoSecundario }}>{p.tamanhos || "—"}</td>
-                    <td style={{ padding: "10px" }}>R$ {Number(p.precoVarejo || 0).toFixed(2)}</td>
-                    <td style={{ padding: "10px", color: "#3182ce" }}>R$ {Number(p.precoAtacado || 0).toFixed(2)}</td>
-                    <td style={{ padding: "10px", fontWeight: "bold", color: "#38a169" }}>{p.estoque} un</td>
-                    <td style={{ padding: "10px", textAlign: "center" }}>
-                      <button onClick={() => handleExcluir(p.id)} style={{ background: "#e53e3e", color: "#fff", border: "none", padding: "5px 10px", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}>Excluir</button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+          {abaAtiva === "materia_prima" && (
+            <Button
+              variant="primary"
+              onClick={() => setModalNovoMaterialAberto(true)}
+              leftIcon={<Plus className="w-4 h-4" />}
+            >
+              Cadastrar Matéria-Prima
+            </Button>
+          )}
+          {abaAtiva === "perdas" && (
+            <Button
+              variant="outline"
+              onClick={() => setModalNovaPerdaAberto(true)}
+              leftIcon={<AlertTriangle className="w-4 h-4 text-amber-400" />}
+            >
+              Registrar Perda / Refugo
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* MODAL DE SELEÇÃO DE TAMANHOS (CADASTRO) */}
-      {modalTamanhosAberto && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1200, padding: "15px", boxSizing: "border-box" }}>
-          <div style={{ background: cores.bgGeral, border: `1px solid ${cores.borda}`, padding: "20px", borderRadius: "12px", width: "100%", maxWidth: "450px", maxHeight: "90vh", overflowY: "auto", boxSizing: "border-box" }}>
-            <h3 style={{ marginTop: 0, marginBottom: "15px", textAlign: "center", fontSize: "16px" }}>👕 Distribuir Quantidades por Tamanho</h3>
-            
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px", marginBottom: "20px" }}>
-              {LISTA_TAMANHOS.map(tam => (
-                <div key={tam} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: cores.bgCard, padding: "6px 10px", borderRadius: "6px", border: `1px solid ${cores.borda}` }}>
-                  <span style={{ fontWeight: "bold", fontSize: "13px" }}>{tam}:</span>
-                  <input 
-                    type="text" 
-                    inputMode="numeric"
-                    value={tamanhosTemp[tam] === 0 ? "" : (tamanhosTemp[tam] ?? "")}
-                    onFocus={e => e.target.select()}
-                    onChange={e => {
-                      const val = e.target.value.replace(/\D/g, "");
-                      setTamanhosTemp(prev => ({ 
-                        ...prev, 
-                        [tam]: val === "" ? "" : parseInt(val, 10) 
-                      }));
-                    }}
-                    style={{ width: "55px", padding: "5px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "4px", textAlign: "center", fontWeight: "bold", fontSize: "13px", outline: "none" }}
-                  />
-                </div>
-              ))}
-            </div>
-
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button onClick={salvarTamanhosModal} style={{ flex: 1, padding: "11px", background: "#28a745", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "14px" }}>
-                Salvar Tamanhos
-              </button>
-              <button onClick={() => setModalTamanhosAberto(false)} style={{ padding: "11px 16px", background: "#6c757d", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "14px" }}>
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL DE SELEÇÃO DE TAMANHOS PARA ENVIO (MOSTRA DISPONÍVEL) */}
-      {modalEnvioTamanhosAberto && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1300, padding: "15px", boxSizing: "border-box" }}>
-          <div style={{ background: cores.bgGeral, border: `1px solid ${cores.borda}`, padding: "20px", borderRadius: "12px", width: "100%", maxWidth: "450px", maxHeight: "90vh", overflowY: "auto", boxSizing: "border-box" }}>
-            <h3 style={{ marginTop: 0, marginBottom: "5px", textAlign: "center", fontSize: "16px" }}>📦 Quantidade e Tamanhos do Envio</h3>
-            <p style={{ textAlign: "center", fontSize: "11px", color: cores.textoSecundario, marginBottom: "15px" }}>Informe quanto deseja enviar de cada tamanho disponível:</p>
-            
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "20px" }}>
-              {Object.keys(fabricaDisponivelAtual).length === 0 ? (
-                <p style={{ textAlign: "center", color: cores.textoSecundario }}>Nenhum tamanho registrado neste produto.</p>
-              ) : (
-                Object.keys(fabricaDisponivelAtual).map(tam => {
-                  const disp = fabricaDisponivelAtual[tam];
-                  if (disp <= 0) return null;
-                  return (
-                    <div key={tam} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: cores.bgCard, padding: "8px 12px", borderRadius: "6px", border: `1px solid ${cores.borda}` }}>
-                      <div>
-                        <span style={{ fontWeight: "bold", fontSize: "14px" }}>{tam}:</span>
-                        <span style={{ fontSize: "11px", color: cores.textoSecundario, marginLeft: "8px" }}>(Disp: {disp} un)</span>
-                      </div>
-                      <input 
-                        type="text" 
-                        inputMode="numeric"
-                        placeholder="0"
-                        value={tamanhosEnvioTemp[tam] === 0 ? "" : (tamanhosEnvioTemp[tam] ?? "")}
-                        onFocus={e => e.target.select()}
-                        onChange={e => {
-                          const val = e.target.value.replace(/\D/g, "");
-                          setTamanhosEnvioTemp(prev => ({ 
-                            ...prev, 
-                            [tam]: val === "" ? "" : parseInt(val, 10) 
-                          }));
-                        }}
-                        style={{ width: "70px", padding: "6px", background: cores.inputBg, border: `1px solid ${cores.borda}`, color: cores.texto, borderRadius: "4px", textAlign: "center", fontWeight: "bold", fontSize: "13px", outline: "none" }}
-                      />
-                    </div>
-                  );
-                })
+      {/* Navegação entre Abas da Fábrica */}
+      <div className="flex border-b border-slate-800 gap-2 overflow-x-auto pb-1 scrollbar-none">
+        {[
+          { id: "ops", label: "Ordens de Produção (OP)", icon: Layers, count: ordensProducao.length },
+          { id: "materia_prima", label: "Estoque de Matéria-Prima", icon: Scissors, count: materiasPrimas.length },
+          { id: "perdas", label: "Gestão de Perdas & Refugo", icon: Percent, count: perdas.length }
+        ].map((tab) => {
+          const Icon = tab.icon;
+          const isAtiva = abaAtiva === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setAbaAtiva(tab.id)}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2.5 rounded-t-xl font-bold text-xs transition-all cursor-pointer border-b-2",
+                isAtiva
+                  ? "border-sky-500 text-sky-400 bg-sky-500/10"
+                  : "border-transparent text-slate-400 hover:text-white hover:bg-slate-900/40"
               )}
-            </div>
+            >
+              <Icon className="w-4 h-4" />
+              <span>{tab.label}</span>
+              <span className="px-1.5 py-0.5 rounded-full bg-slate-800 text-[10px] font-mono text-slate-300">
+                {tab.count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button onClick={salvarTamanhosEnvioModal} style={{ flex: 1, padding: "11px", background: "#28a745", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "14px" }}>
-                Confirmar Lote
-              </button>
-              <button onClick={() => setModalEnvioTamanhosAberto(false)} style={{ padding: "11px 16px", background: "#6c757d", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "14px" }}>
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ABA 1: ORDENS DE PRODUÇÃO */}
+      {abaAtiva === "ops" && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {ordensProducao.map((op) => {
+              const config = STATUS_OP_CONFIG[op.status] || STATUS_OP_CONFIG[STATUS_OP.PLANEJAMENTO];
+              const estagios = [
+                STATUS_OP.PLANEJAMENTO,
+                STATUS_OP.CORTE,
+                STATUS_OP.COSTURA,
+                STATUS_OP.ESTAMPA,
+                STATUS_OP.ACABAMENTO,
+                STATUS_OP.CONCLUIDO
+              ];
+              const stepIndex = estagios.indexOf(op.status);
+              const percentual = Math.round(((stepIndex + 1) / estagios.length) * 100);
 
-      {/* MODAL 1: SELECIONAR PRODUTOS */}
-      {modalSelecaoAberto && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000, padding: "15px", boxSizing: "border-box" }}>
-          <div style={{ background: cores.bgGeral, border: `1px solid ${cores.borda}`, padding: "20px", borderRadius: "12px", width: "100%", maxWidth: "850px", maxHeight: "90vh", overflowY: "auto", boxSizing: "border-box" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
-              <h2 style={{ margin: 0, fontSize: "16px" }}>📦 Selecionar Produtos da Fábrica</h2>
-              <button onClick={() => setModalSelecaoAberto(false)} style={{ background: "#e53e3e", color: "#fff", border: "none", padding: "5px 10px", borderRadius: "4px", cursor: "pointer", fontSize: "12px" }}>✕ Fechar</button>
-            </div>
+              return (
+                <Card
+                  key={op.id}
+                  className="p-4 flex flex-col justify-between space-y-4 border-slate-800 hover:border-slate-700 transition-all"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-mono font-black text-sky-400">
+                        {op.codigoOP}
+                      </span>
+                      <Badge variant={config.badge} size="sm">
+                        {config.label}
+                      </Badge>
+                    </div>
 
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "15px", minWidth: "500px" }}>
-                <thead>
-                  <tr style={{ borderBottom: `2px solid ${cores.borda}`, fontSize: "12px", color: cores.textoSecundario }}>
-                    <th style={{ padding: "8px" }}>Nome</th>
-                    <th style={{ padding: "8px" }}>Ref</th>
-                    <th style={{ padding: "8px" }}>Tamanhos</th>
-                    <th style={{ padding: "8px" }}>Estoque</th>
-                    <th style={{ padding: "8px", textAlign: "center" }}>Ação</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {produtosFabrica.map(p => {
-                    const selecionado = itensSelecionados[p.id]?.qtdTotal > 0;
-                    return (
-                      <tr key={p.id} style={{ borderBottom: `1px solid ${cores.borda}`, fontSize: "13px" }}>
-                        <td style={{ padding: "8px" }}>{p.nome}</td>
-                        <td style={{ padding: "8px" }}>{p.referencia || "—"}</td>
-                        <td style={{ padding: "8px", fontSize: "11px", color: cores.textoSecundario }}>{p.tamanhos || "—"}</td>
-                        <td style={{ padding: "8px", color: "#38a169", fontWeight: "bold" }}>{p.estoque} un</td>
-                        <td style={{ padding: "8px", textAlign: "center" }}>
-                          <button 
-                            onClick={() => {
-                              if (!selecionado) {
-                                setItensSelecionados(prev => ({ ...prev, [p.id]: { qtdTotal: 0, tamanhosStr: "", tamanhosObj: {}, factoryRemainingObj: parseTamanhos(p.tamanhos) } }));
-                                abrirModalEnvioTamanhos(p.id);
-                              } else {
-                                setItensSelecionados(prev => {
-                                  const copia = { ...prev };
-                                  delete copia[p.id];
-                                  return copia;
-                                });
-                              }
-                            }}
-                            style={{ background: selecionado ? "#28a745" : "#007bff", color: "#fff", border: "none", padding: "5px 10px", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "11px" }}
+                    <div>
+                      <h3 className="text-base font-bold text-white">{op.modelo}</h3>
+                      <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+                        <span>Ref: {op.referencia || "CAM-001"}</span>
+                        <span>•</span>
+                        <span>{op.categoria}</span>
+                      </div>
+                    </div>
+
+                    {/* Barra de Progresso do Lote */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-slate-400">Progresso da Produção:</span>
+                        <span className="font-bold text-sky-400">{percentual}%</span>
+                      </div>
+                      <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-sky-500 to-emerald-400 rounded-full transition-all duration-300"
+                          style={{ width: `${percentual}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Grade Planejada de Peças */}
+                    <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800/80 text-xs">
+                      <div className="flex justify-between text-slate-400 mb-1">
+                        <span>Grade Planejada:</span>
+                        <strong className="text-white">{op.totalPecasPlanejadas} peças</strong>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {Object.entries(op.gradePlanejada || {}).map(([tam, qtd]) => (
+                          <span
+                            key={tam}
+                            className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-[11px] font-mono text-slate-300"
                           >
-                            {selecionado ? "✓ Selecionado" : "Selecionar"}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button 
-                onClick={() => setModalListaSelecionadosAberto(true)}
-                style={{ width: "100%", maxWidth: "250px", background: "#28a745", color: "#fff", border: "none", padding: "11px 16px", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", fontSize: "13px" }}
-              >
-                Avançar ➔
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 2: LISTA DOS SELECIONADOS */}
-      {modalListaSelecionadosAberto && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1100, padding: "15px", boxSizing: "border-box" }}>
-          <div style={{ background: cores.bgGeral, border: `1px solid ${cores.borda}`, padding: "20px", borderRadius: "12px", width: "100%", maxWidth: "750px", maxHeight: "90vh", overflowY: "auto", boxSizing: "border-box" }}>
-            <h2 style={{ textAlign: "center", marginTop: 0, fontSize: "17px" }}>LISTA DOS PRODUTOS SELECIONADOS</h2>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px", margin: "15px 0" }}>
-              {Object.keys(itensSelecionados).filter(id => itensSelecionados[id]?.qtdTotal > 0).length === 0 ? (
-                <p style={{ textAlign: "center", color: cores.textoSecundario }}>Nenhum produto selecionado ou quantidade em 0.</p>
-              ) : (
-                Object.keys(itensSelecionados).filter(id => itensSelecionados[id]?.qtdTotal > 0).map(id => {
-                  const prod = produtosFabrica.find(p => p.id === id);
-                  const dadosEnvio = itensSelecionados[id];
-                  if (!prod) return null;
-                  return (
-                    <div key={id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: cores.bgCard, padding: "12px 15px", borderRadius: "6px", border: `1px solid ${cores.borda}`, gap: "10px", flexWrap: "wrap" }}>
-                      <div>
-                        <strong style={{ fontSize: "14px" }}>{prod.nome}</strong>
-                        <div style={{ fontSize: "11px", color: cores.textoSecundario }}>Ref: {prod.referencia || "—"} | Disp: {prod.estoque} un</div>
-                        <div style={{ fontSize: "12px", color: "#28a745", fontWeight: "bold", marginTop: "4px" }}>
-                          Envio: {dadosEnvio.tamanhosStr} (Total: {dadosEnvio.qtdTotal} un)
-                        </div>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                        <button 
-                          onClick={() => abrirModalEnvioTamanhos(id)}
-                          style={{ background: "#ffc107", color: "#000", border: "none", padding: "8px 12px", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", fontSize: "12px" }}
-                        >
-                          👕 Alterar Quantidades
-                        </button>
+                            {tam}: <strong className="text-white">{qtd}</strong>
+                          </span>
+                        ))}
                       </div>
                     </div>
-                  );
-                })
-              )}
-            </div>
 
-            <div style={{ display: "flex", gap: "8px", marginTop: "15px", flexWrap: "wrap" }}>
-              <button onClick={enviarParaLoja} style={{ flex: 1, padding: "12px", background: "#28a745", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "bold", fontSize: "14px", cursor: "pointer" }}>
-                ENVIAR PARA A LOJA
-              </button>
-              <button onClick={() => setModalListaSelecionadosAberto(false)} style={{ padding: "12px 16px", background: "#6c757d", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", fontSize: "14px" }}>
-                Voltar
-              </button>
-            </div>
+                    {op.tecidoUtilizado && (
+                      <div className="text-[11px] text-slate-400">
+                        <span className="font-semibold text-slate-300">Insumos: </span>
+                        {op.tecidoUtilizado}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Ações da OP */}
+                  <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
+                    {op.status !== STATUS_OP.CONCLUIDO ? (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleAvancarEstagioOp(op)}
+                          rightIcon={<ArrowRight className="w-3.5 h-3.5" />}
+                          className="text-xs"
+                        >
+                          Avançar Etapa
+                        </Button>
+
+                        <Button
+                          variant="success"
+                          size="sm"
+                          onClick={() => abrirModalTransferencia(op)}
+                          leftIcon={<Send className="w-3.5 h-3.5" />}
+                          className="text-xs"
+                        >
+                          Transferir Loja
+                        </Button>
+                      </>
+                    ) : (
+                      <span className="text-xs text-emerald-400 font-bold flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4" />
+                        Lote Transferido para Loja
+                      </span>
+                    )}
+                  </div>
+                </Card>
+              );
+            })}
           </div>
         </div>
       )}
 
+      {/* ABA 2: ESTOQUE DE MATÉRIA-PRIMA */}
+      {abaAtiva === "materia_prima" && (
+        <Card>
+          <Table>
+            <TableHeader>
+              <TableRow isInteractive={false}>
+                <TableHead>Insumo / Matéria-Prima</TableHead>
+                <TableHead>Categoria / Tipo</TableHead>
+                <TableHead>Estoque Atual</TableHead>
+                <TableHead>Estoque Mínimo</TableHead>
+                <TableHead>Custo Unitário</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Fornecedor</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {materiasPrimas.map((mat) => {
+                const emAlerta = mat.estoqueAtual <= mat.estoqueMinimo;
+                return (
+                  <TableRow key={mat.id}>
+                    <TableCell>
+                      <strong className="text-white block">{mat.nome}</strong>
+                      <span className="text-[11px] text-slate-400">{mat.localizacao || "Galpão"}</span>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="neutral" size="sm">
+                        {mat.tipo}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="font-mono font-bold text-white text-sm">
+                      {mat.estoqueAtual} {mat.unidade}
+                    </TableCell>
+                    <TableCell className="font-mono text-slate-400">
+                      {mat.estoqueMinimo} {mat.unidade}
+                    </TableCell>
+                    <TableCell className="font-mono text-emerald-400 font-semibold">
+                      {formatCurrency(mat.custoUnitario || 0)}
+                    </TableCell>
+                    <TableCell>
+                      {emAlerta ? (
+                        <Badge variant="danger" size="sm" withDot={true}>
+                          Repor Urgente
+                        </Badge>
+                      ) : (
+                        <Badge variant="success" size="sm" withDot={true}>
+                          Estoque Normal
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right text-xs text-slate-300">
+                      {mat.fornecedor || "Não informado"}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
+
+      {/* ABA 3: GESTÃO DE PERDAS & REFUGO */}
+      {abaAtiva === "perdas" && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Card variant="subtle" className="p-4 space-y-1">
+              <span className="text-xs text-slate-400">Total de Perdas Registradas</span>
+              <div className="text-2xl font-black text-rose-400 font-mono">
+                {perdas.length} ocorrências
+              </div>
+            </Card>
+            <Card variant="subtle" className="p-4 space-y-1">
+              <span className="text-xs text-slate-400">Custo Total de Refugo</span>
+              <div className="text-2xl font-black text-white font-mono">
+                {formatCurrency(
+                  perdas.reduce((acc, p) => acc + (Number(p.custoEstimadoPerda) || 0), 0)
+                )}
+              </div>
+            </Card>
+            <Card variant="subtle" className="p-4 space-y-1">
+              <span className="text-xs text-slate-400">Aproveitamento Médio de Tecido</span>
+              <div className="text-2xl font-black text-emerald-400 font-mono">94.8%</div>
+            </Card>
+          </div>
+
+          <Card>
+            <Table>
+              <TableHeader>
+                <TableRow isInteractive={false}>
+                  <TableHead>Data</TableHead>
+                  <TableHead>Lote / OP</TableHead>
+                  <TableHead>Motivo da Perda</TableHead>
+                  <TableHead>Material Afetado</TableHead>
+                  <TableHead>Qtd. Desperdiçada</TableHead>
+                  <TableHead>Custo Estimado</TableHead>
+                  <TableHead className="text-right">Observação</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {perdas.length === 0 ? (
+                  <TableEmpty message="Nenhuma perda registrada. Ótimo aproveitamento!" />
+                ) : (
+                  perdas.map((p) => (
+                    <TableRow key={p.id}>
+                      <TableCell className="text-xs text-slate-400">{p.data}</TableCell>
+                      <TableCell className="font-mono font-bold text-sky-400">
+                        {p.opCodigo}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="warning" size="sm" className="capitalize">
+                          {p.motivo.replace("_", " ")}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-slate-200">{p.materialNome}</TableCell>
+                      <TableCell className="font-mono font-bold text-rose-400">
+                        {p.quantidade} {p.unidade || "kg/m"}
+                      </TableCell>
+                      <TableCell className="font-mono font-bold text-white">
+                        {formatCurrency(p.custoEstimadoPerda || 0)}
+                      </TableCell>
+                      <TableCell className="text-right text-xs text-slate-400">
+                        {p.observacao || "-"}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </Card>
+        </div>
+      )}
+
+      {/* MODAL: NOVA ORDEM DE PRODUÇÃO (OP) */}
+      <Modal isOpen={modalNovaOpAberto} onClose={() => setModalNovaOpAberto(false)} size="lg">
+        <form onSubmit={handleCriarOp}>
+          <ModalHeader
+            title="Abrir Nova Ordem de Produção (OP)"
+            description="Defina o modelo, grade planejada de tamanhos e insumos para a confecção."
+            onClose={() => setModalNovaOpAberto(false)}
+          />
+          <ModalBody className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Input
+                label="Modelo da Peça"
+                required
+                placeholder="Ex: Camiseta Silk Waves Classic"
+                value={modeloOp}
+                onChange={(e) => setModeloOp(e.target.value)}
+              />
+              <Input
+                label="Referência / Código"
+                placeholder="CAM-001"
+                value={referenciaOp}
+                onChange={(e) => setReferenciaOp(e.target.value)}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <Select
+                label="Categoria"
+                value={categoriaOp}
+                onChange={(e) => setCategoriaOp(e.target.value)}
+                options={[
+                  { value: "Camiseta", label: "Camiseta" },
+                  { value: "Bermuda", label: "Bermuda" },
+                  { value: "Short", label: "Short" },
+                  { value: "Camisa Gola Polo", label: "Gola Polo" },
+                  { value: "Acessórios", label: "Acessórios" }
+                ]}
+              />
+
+              <Input
+                label="Previsão de Término"
+                type="date"
+                value={previsaoOp}
+                onChange={(e) => setPrevisaoOp(e.target.value)}
+              />
+
+              <Input
+                label="Responsável pelo Lote"
+                placeholder="Ex: Mestre Raimundo"
+                value={responsavelOp}
+                onChange={(e) => setResponsavelOp(e.target.value)}
+              />
+            </div>
+
+            <Input
+              label="Tecido / Matéria-Prima Utilizada"
+              placeholder="Ex: Malha Algodão 30.1 Preto (40kg) + Linha Poliéster"
+              value={tecidoOp}
+              onChange={(e) => setTecidoOp(e.target.value)}
+            />
+
+            {/* Grade de Tamanhos Planejada */}
+            <div>
+              <span className="text-xs font-bold text-white uppercase tracking-wider block mb-2">
+                Grade de Peças Planejadas:
+              </span>
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                {["PP", "P", "M", "G", "GG", "XG"].map((tam) => (
+                  <div key={tam} className="p-2 rounded-xl bg-slate-950 border border-slate-800 text-center">
+                    <span className="text-xs font-mono font-bold text-slate-400 block">{tam}</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={gradeOp[tam] || 0}
+                      onChange={(e) =>
+                        setGradeOp((prev) => ({ ...prev, [tam]: parseInt(e.target.value, 10) || 0 }))
+                      }
+                      className="w-full bg-slate-900 text-white rounded mt-1 text-center font-bold text-sm h-8 border border-slate-800"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" type="button" onClick={() => setModalNovaOpAberto(false)}>
+              Cancelar
+            </Button>
+            <Button variant="primary" type="submit" isLoading={salvandoOp}>
+              Gerar Ordem de Produção
+            </Button>
+          </ModalFooter>
+        </form>
+      </Modal>
+
+      {/* MODAL: CADASTRAR MATÉRIA-PRIMA */}
+      <Modal isOpen={modalNovoMaterialAberto} onClose={() => setModalNovoMaterialAberto(false)} size="md">
+        <form onSubmit={handleSalvarMaterial}>
+          <ModalHeader
+            title="Cadastrar Matéria-Prima"
+            description="Entrada de tecido, aviamento ou insumo de costura no estoque da fábrica."
+            onClose={() => setModalNovoMaterialAberto(false)}
+          />
+          <ModalBody className="space-y-3">
+            <Input
+              label="Descrição do Insumo"
+              required
+              placeholder="Ex: Malha Algodão 30.1 Penteado Branco"
+              value={nomeMaterial}
+              onChange={(e) => setNomeMaterial(e.target.value)}
+            />
+
+            <div className="grid grid-cols-2 gap-3">
+              <Select
+                label="Tipo de Material"
+                value={tipoMaterial}
+                onChange={(e) => setTipoMaterial(e.target.value)}
+                options={TIPOS_MATERIA_PRIMA.map((t) => ({ value: t, label: t }))}
+              />
+              <Input
+                label="Unidade de Medida"
+                placeholder="kg, metros, rolos..."
+                value={unidadeMaterial}
+                onChange={(e) => setUnidadeMaterial(e.target.value)}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Estoque Atual"
+                type="number"
+                step="0.1"
+                required
+                value={estoqueAtualMaterial}
+                onChange={(e) => setEstoqueAtualMaterial(e.target.value)}
+              />
+              <Input
+                label="Estoque Mínimo (Alerta)"
+                type="number"
+                step="0.1"
+                value={estoqueMinMaterial}
+                onChange={(e) => setEstoqueMinMaterial(e.target.value)}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Custo Unitário (R$)"
+                type="number"
+                step="0.01"
+                placeholder="45.00"
+                value={custoMaterial}
+                onChange={(e) => setCustoMaterial(e.target.value)}
+              />
+              <Input
+                label="Fornecedor"
+                placeholder="Ex: Têxtil Brasil"
+                value={fornecedorMaterial}
+                onChange={(e) => setFornecedorMaterial(e.target.value)}
+              />
+            </div>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" type="button" onClick={() => setModalNovoMaterialAberto(false)}>
+              Cancelar
+            </Button>
+            <Button variant="primary" type="submit" isLoading={salvandoMaterial}>
+              Salvar Matéria-Prima
+            </Button>
+          </ModalFooter>
+        </form>
+      </Modal>
+
+      {/* MODAL: REGISTRAR PERDA / REFUGO */}
+      <Modal isOpen={modalNovaPerdaAberto} onClose={() => setModalNovaPerdaAberto(false)} size="md">
+        <form onSubmit={handleSalvarPerda}>
+          <ModalHeader
+            title="Registrar Perda / Refugo de Produção"
+            description="Controle de sobras, defeitos de corte, estamparia ou tecido avariado."
+            onClose={() => setModalNovaPerdaAberto(false)}
+          />
+          <ModalBody className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="OP de Origem"
+                placeholder="Ex: OP-2026-084"
+                value={opPerda}
+                onChange={(e) => setOpPerda(e.target.value)}
+              />
+              <Select
+                label="Motivo da Perda"
+                value={motivoPerda}
+                onChange={(e) => setMotivoPerda(e.target.value)}
+                options={[
+                  { value: "falha_corte", label: "Falha de Corte" },
+                  { value: "defeito_tecido", label: "Defeito de Fabricação no Tecido" },
+                  { value: "erro_costura", label: "Erro Irrecuperável de Costura" },
+                  { value: "falha_estampa", label: "Falha na Estamparia / Silk" },
+                  { value: "sobra_rolo", label: "Sobra / Ponta de Rolo" }
+                ]}
+              />
+            </div>
+
+            <Input
+              label="Material Perdido"
+              placeholder="Ex: Malha Algodão Preto"
+              value={materialPerda}
+              onChange={(e) => setMaterialPerda(e.target.value)}
+            />
+
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Quantidade Desperdiçada"
+                type="number"
+                step="0.1"
+                required
+                placeholder="Ex: 3.5"
+                value={qtdPerda}
+                onChange={(e) => setQtdPerda(e.target.value)}
+              />
+              <Input
+                label="Custo Estimado da Perda (R$)"
+                type="number"
+                step="0.01"
+                placeholder="140.00"
+                value={custoPerda}
+                onChange={(e) => setCustoPerda(e.target.value)}
+              />
+            </div>
+
+            <Input
+              label="Observações da Ocorrência"
+              placeholder="Ex: Lâmina da máquina travou no enfesto"
+              value={obsPerda}
+              onChange={(e) => setObsPerda(e.target.value)}
+            />
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" type="button" onClick={() => setModalNovaPerdaAberto(false)}>
+              Cancelar
+            </Button>
+            <Button variant="primary" type="submit" isLoading={salvandoPerda}>
+              Registrar Ocorrência
+            </Button>
+          </ModalFooter>
+        </form>
+      </Modal>
+
+      {/* MODAL: TRANSFERÊNCIA ATÔMICA PARA A LOJA */}
+      {opParaTransferir && (
+        <Modal isOpen={modalTransferirAberto} onClose={() => setModalTransferirAberto(false)} size="md">
+          <ModalHeader
+            title="Transferir Peças Prontas para a Loja"
+            description={`Lote ${opParaTransferir.codigoOP} • ${opParaTransferir.modelo}`}
+            onClose={() => setModalTransferirAberto(false)}
+          />
+          <ModalBody className="space-y-4">
+            <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-400 flex items-start gap-2.5">
+              <Send className="w-5 h-5 flex-shrink-0 mt-0.5" />
+              <div>
+                <strong className="block text-white font-bold">Transferência Atômica</strong>
+                As peças abaixo serão debitadas da produção e ficarão imediatamente disponíveis no
+                PDV e Estoque da Loja.
+              </div>
+            </div>
+
+            <div>
+              <span className="text-xs font-bold text-white uppercase tracking-wider block mb-2">
+                Conferência da Grade para Envio ao Balcão:
+              </span>
+              <div className="grid grid-cols-4 gap-2">
+                {Object.entries(gradeTransferir).map(([tam, qtd]) => (
+                  <div key={tam} className="p-2 rounded-xl bg-slate-950 border border-slate-800 text-center">
+                    <span className="text-xs font-mono font-bold text-slate-400 block">{tam}</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={qtd}
+                      onChange={(e) =>
+                        setGradeTransferir((prev) => ({
+                          ...prev,
+                          [tam]: parseInt(e.target.value, 10) || 0
+                        }))
+                      }
+                      className="w-full bg-slate-900 text-white rounded mt-1 text-center font-bold text-sm h-8 border border-slate-800"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" onClick={() => setModalTransferirAberto(false)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="success"
+              onClick={handleConfirmarTransferencia}
+              isLoading={transferindo}
+              leftIcon={<Send className="w-4 h-4" />}
+            >
+              Confirmar Envio para a Loja
+            </Button>
+          </ModalFooter>
+        </Modal>
+      )}
     </div>
   );
 }
