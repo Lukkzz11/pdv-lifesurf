@@ -1,0 +1,52 @@
+{
+  "name": "LifeSurf PDV & Confecções ERP",
+  "short_name": "LifeSurf PDV",
+  "description": "Sistema Completo de Ponto de Venda, Fábrica de Confecções, Pedidos e Gestão LifeSurf",
+  "start_url": "/",
+  "id": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#020617",
+  "theme_color": "#0f172a",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "categories": ["business", "productivity", "shopping"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Frente de Caixa (PDV)",
+      "short_name": "PDV",
+      "description": "Abrir Frente de Caixa Rápido",
+      "url": "/pdv",
+      "icons": [{ "src": "/favicon.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Pipeline de Pedidos",
+      "short_name": "Pedidos",
+      "description": "Kanban de Separação e Entregas",
+      "url": "/pedidos",
+      "icons": [{ "src": "/favicon.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Fábrica e Produção",
+      "short_name": "Fábrica",
+      "description": "Ordens de Produção e Estoque de Matéria-Prima",
+      "url": "/estoque-fabrica",
+      "icons": [{ "src": "/favicon.svg", "sizes": "192x192" }]
+    }
+  ]
+}

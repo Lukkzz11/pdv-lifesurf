@@ -1,184 +1,129 @@
 import { useState } from "react";
-import { auth } from "../firebase";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { useNavigate, useLocation } from "react-router-dom";
+import { useAuth } from "../security/AuthContext";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "../components/ui/Card";
+import { Button } from "../components/ui/Button";
+import { Input } from "../components/ui/Input";
+import { Badge } from "../components/ui/Badge";
+import { Waves, Lock, Mail, ArrowRight, ShieldCheck } from "lucide-react";
 
-export default function Login({ tema, alternarTema }) {
+export default function Login() {
+  const { login } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+
   const [email, setEmail] = useState("");
-  const [senha, setSenha] = useState("");
-  const [carregando, setCarregando] = useState(false);
-  const [erro, setErro] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(location.state?.error || "");
 
-  const cores = tema === "dark" ? {
-    bg: "#121212",
-    card: "#1c1c1c",
-    input: "#2a2a2a",
-    borda: "#333333",
-    texto: "#ffffff",
-    textoSecundario: "#aaaaaa"
-  } : {
-    bg: "#f4f5f7",
-    card: "#ffffff",
-    input: "#ffffff",
-    borda: "#dcdfe6",
-    texto: "#1a202c",
-    textoSecundario: "#4a5568"
-  };
-
-  async function handleLogin(e) {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!email.trim() || !senha.trim()) {
-      setErro("Preencha e-mail e senha.");
+    if (!email || !password) {
+      setError("Por favor, preencha todos os campos.");
       return;
     }
 
-    setCarregando(true);
-    setErro("");
-
+    setError("");
+    setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email.trim(), senha);
+      await login(email, password);
+      // Após o login, direciona para a seleção de empresa
+      const from = location.state?.from?.pathname || "/selecionar-empresa";
+      navigate(from, { replace: true });
     } catch (err) {
-      console.error("Erro no login:", err);
-      if (err.code === "auth/invalid-credential" || err.code === "auth/wrong-password" || err.code === "auth/user-not-found") {
-        setErro("E-mail ou senha incorretos.");
-      } else if (err.code === "auth/invalid-email") {
-        setErro("Formato de e-mail inválido.");
-      } else {
-        setErro("Erro ao acessar: " + err.message);
-      }
+      console.error("[Login] Falha na autenticação:", err);
+      setError("Credenciais inválidas ou conta não encontrada.");
     } finally {
-      setCarregando(false);
+      setLoading(false);
     }
-  }
+  };
 
   return (
-    <div style={{
-      minHeight: "100vh",
-      background: cores.bg,
-      display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
-      fontFamily: "sans-serif",
-      color: cores.texto,
-      padding: "20px"
-    }}>
-      <div style={{
-        position: "absolute",
-        top: "20px",
-        right: "20px"
-      }}>
-        <button
-          onClick={alternarTema}
-          style={{
-            padding: "6px 14px",
-            borderRadius: "20px",
-            border: `1px solid ${cores.borda}`,
-            background: cores.card,
-            color: cores.texto,
-            cursor: "pointer",
-            fontSize: "13px"
-          }}
-        >
-          {tema === "dark" ? "☀️ Claro" : "🌙 Escuro"}
-        </button>
-      </div>
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4 sm:p-6">
+      <div className="w-full max-w-md space-y-6">
+        {/* Brand Header com Logo Life Oficial */}
+        <div className="flex flex-col items-center text-center space-y-3">
+          <img
+            src="/assets/logo-white.png"
+            alt="LifeSurf Confecções"
+            className="h-14 w-auto max-w-[220px] object-contain drop-shadow-md select-none"
+            onError={(e) => {
+              e.currentTarget.style.display = "none";
+              e.currentTarget.nextElementSibling.style.display = "flex";
+            }}
+          />
 
-      <div style={{
-        background: cores.card,
-        padding: "35px 30px",
-        borderRadius: "10px",
-        border: `1px solid ${cores.borda}`,
-        width: "100%",
-        maxWidth: "380px",
-        boxShadow: "0 10px 30px rgba(0,0,0,0.3)"
-      }}>
-        <div style={{ textAlign: "center", marginBottom: "25px" }}>
-          <h1 style={{ margin: "0 0 6px 0", fontSize: "26px" }}>⚡ LifeSurf</h1>
-          <p style={{ margin: 0, color: cores.textoSecundario, fontSize: "14px" }}>
-            Acesso ao Sistema de PDV & Caixa
+          {/* Fallback */}
+          <div className="hidden flex-col items-center text-center space-y-2">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-sky-600 to-cyan-400 flex items-center justify-center text-slate-950 font-black shadow-xl shadow-sky-500/20">
+              <Waves className="w-8 h-8 text-slate-950" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-black tracking-wider text-white">
+                LIFE<span className="text-sky-400">SURF</span>
+              </h1>
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-400 font-medium">
+            Sistema Integrado de PDV & Confecções
           </p>
         </div>
 
-        {erro && (
-          <div style={{
-            background: "rgba(229, 62, 62, 0.15)",
-            border: "1px solid #e53e3e",
-            color: "#e53e3e",
-            padding: "10px",
-            borderRadius: "6px",
-            fontSize: "13px",
-            marginBottom: "15px",
-            textAlign: "center"
-          }}>
-            {erro}
+        {/* Card de Login */}
+        <Card className="p-6 sm:p-8 space-y-5 border-slate-800/90 shadow-2xl">
+          <div className="space-y-1">
+            <CardTitle className="text-xl">Acesso ao Sistema</CardTitle>
+            <CardDescription>
+              Informe seu e-mail e senha corporativos para iniciar o turno.
+            </CardDescription>
           </div>
-        )}
 
-        <form onSubmit={handleLogin}>
-          <div style={{ marginBottom: "15px" }}>
-            <label style={{ display: "block", fontSize: "13px", marginBottom: "6px", color: cores.textoSecundario }}>
-              E-mail
-            </label>
-            <input
+          {error && (
+            <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs">
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <Input
+              label="E-mail de Acesso"
               type="email"
-              placeholder=""
+              required
+              autoFocus
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              autoFocus
-              style={{
-                width: "100%",
-                padding: "12px",
-                background: cores.input,
-                border: `1px solid ${cores.borda}`,
-                borderRadius: "6px",
-                color: cores.texto,
-                boxSizing: "border-box",
-                fontSize: "15px",
-                outline: "none"
-              }}
+              placeholder="seu.email@lifesurf.com"
+              leftIcon={<Mail className="w-4 h-4" />}
             />
-          </div>
 
-          <div style={{ marginBottom: "25px" }}>
-            <label style={{ display: "block", fontSize: "13px", marginBottom: "6px", color: cores.textoSecundario }}>
-              Senha
-            </label>
-            <input
+            <Input
+              label="Senha"
               type="password"
-              placeholder=""
-              value={senha}
-              onChange={(e) => setSenha(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "12px",
-                background: cores.input,
-                border: `1px solid ${cores.borda}`,
-                borderRadius: "6px",
-                color: cores.texto,
-                boxSizing: "border-box",
-                fontSize: "15px",
-                outline: "none"
-              }}
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              leftIcon={<Lock className="w-4 h-4" />}
             />
-          </div>
 
-          <button
-            type="submit"
-            disabled={carregando}
-            style={{
-              width: "100%",
-              padding: "14px",
-              background: "#007bff",
-              color: "#fff",
-              border: "none",
-              borderRadius: "6px",
-              fontSize: "16px",
-              fontWeight: "bold",
-              cursor: carregando ? "not-allowed" : "pointer"
-            }}
-          >
-            {carregando ? "Autenticando..." : "Entrar no Sistema"}
-          </button>
-        </form>
+            <Button
+              variant="primary"
+              type="submit"
+              className="w-full h-11"
+              isLoading={loading}
+              rightIcon={<ArrowRight className="w-4 h-4" />}
+            >
+              Entrar no Sistema
+            </Button>
+          </form>
+
+          <div className="pt-2 text-center text-[11px] text-slate-500 flex items-center justify-center gap-1.5">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Ambiente seguro com criptografia Firebase Auth</span>
+          </div>
+        </Card>
       </div>
     </div>
   );
