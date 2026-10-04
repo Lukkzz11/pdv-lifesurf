@@ -13,6 +13,11 @@ import CatalogoPublico from "../pages/CatalogoPublico";
 import Relatorios from "../pages/Relatorios";
 import Etiquetas from "../pages/Etiquetas";
 import Calendario from "../pages/Calendario";
+import Configuracoes from "../pages/Configuracoes";
+import GerenciarCatalogo from "../pages/GerenciarCatalogo";
+import Clientes from "../pages/Clientes";
+import ContasAVer from "../pages/ContasAVer";
+import FinanceiroGastos from "../pages/FinanceiroGastos";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
@@ -109,20 +114,16 @@ export default function AppRoutes() {
           <Route path="/relatorios" element={<Relatorios />} />
           <Route path="/etiquetas" element={<Etiquetas />} />
           <Route path="/calendario" element={<Calendario />} />
-          <Route path="/clientes" element={<OperationalPlaceholder title="Gestão de Clientes" description="Cadastro de clientes, histórico de compras e limites de crédito." />} />
-          <Route path="/a-ver" element={<OperationalPlaceholder title="Contas A Ver / Fiado" description="Controle de recebíveis e pagamentos pendentes." />} />
+          <Route path="/clientes" element={<Clientes />} />
+          <Route path="/a-ver" element={<ContasAVer />} />
+          <Route path="/financeiro" element={<FinanceiroGastos />} />
+          <Route path="/gastos" element={<Navigate to="/financeiro" replace />} />
+          <Route path="/livro-caixa" element={<Navigate to="/financeiro" replace />} />
 
-          {/* Rotas Administrativas */}
-          <Route
-            element={
-              <ProtectedRoute
-                allowedRoles={[USER_ROLES.SUPERADMIN, USER_ROLES.ADMIN, USER_ROLES.GERENTE]}
-                requireTenant={true}
-              />
-            }
-          >
-            <Route path="/configuracoes" element={<OperationalPlaceholder title="Configurações da Loja" description="Parâmetros fiscais, impressora térmica e dados cadastrais." />} />
-          </Route>
+          {/* Ajustes e Configurações da Empresa & ERP */}
+          <Route path="/configuracoes" element={<Configuracoes />} />
+          <Route path="/gerenciar-catalogo" element={<GerenciarCatalogo />} />
+          <Route path="/editar-catalogo" element={<Navigate to="/gerenciar-catalogo" replace />} />
 
           {/* Gestão Global Multiempresa */}
           <Route

@@ -3,8 +3,15 @@ import { useTenant } from "../contexts/TenantContext";
 import {
   fetchCalendarEvents,
   createCalendarEvent,
-  TIPOS_EVENTO
+  TIPOS_EVENTO,
+  generateGoogleCalendarUrl,
+  syncSingleEventToGoogle
 } from "../services/calendarService";
+import {
+  isGoogleConnected,
+  getGoogleUserInfo,
+  requestGoogleAccessToken
+} from "../services/googleApiService";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
@@ -12,6 +19,7 @@ import { Modal } from "../components/ui/Modal";
 import { Input } from "../components/ui/Input";
 import { Select } from "../components/ui/Select";
 import { cn } from "../utils/cn";
+import toast from "react-hot-toast";
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -53,6 +61,9 @@ export function Calendario() {
   // Modal de novo agendamento
   const [modalOpen, setModalOpen] = useState(false);
   const [formSaving, setFormSaving] = useState(false);
+  const [googleConnected, setGoogleConnected] = useState(() => isGoogleConnected());
+  const [syncingGoogleId, setSyncingGoogleId] = useState(null);
+  const [connectingGoogle, setConnectingGoogle] = useState(false);
   const [formData, setFormData] = useState({
     titulo: "",
     tipo: "entrega_pedido",
@@ -60,7 +71,8 @@ export function Calendario() {
     horario: "14:00",
     responsavel: "",
     cliente: "",
-    descricao: ""
+    descricao: "",
+    syncGoogle: true
   });
 
   // Carregar eventos
@@ -172,6 +184,45 @@ export function Calendario() {
     return { todayCount, deliveriesCount, opsCount };
   }, [events, eventsByDate, todayStr]);
 
+  // Conectar Google Identity Services
+  const handleConnectGoogle = async () => {
+    setConnectingGoogle(true);
+    try {
+      await requestGoogleAccessToken();
+      setGoogleConnected(true);
+      toast.success("Google Workspace conectado com sucesso!");
+    } catch (err) {
+      console.warn("Falha na autenticação Google:", err);
+      toast.error(err.message || "Erro ao conectar conta Google.");
+    } finally {
+      setConnectingGoogle(false);
+    }
+  };
+
+  // Sincronizar evento avulso com Google Calendar
+  const handleSyncEvent = async (evt) => {
+    if (isGoogleConnected()) {
+      setSyncingGoogleId(evt.id);
+      try {
+        const res = await syncSingleEventToGoogle(evt);
+        setEvents((prev) =>
+          prev.map((e) =>
+            e.id === evt.id ? { ...e, googleEventId: res.eventId, googleHtmlLink: res.htmlLink } : e
+          )
+        );
+        toast.success("Sincronizado com o Google Calendar da empresa!");
+      } catch (err) {
+        toast.error("Falha ao sincronizar: " + err.message);
+      } finally {
+        setSyncingGoogleId(null);
+      }
+    } else {
+      const url = generateGoogleCalendarUrl(evt);
+      window.open(url, "_blank");
+      toast("Abrindo no Google Calendar via link direto...", { icon: "📅" });
+    }
+  };
+
   // Submeter novo evento
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
@@ -183,6 +234,11 @@ export function Calendario() {
       setEvents((prev) => [created, ...prev]);
       setModalOpen(false);
       setSelectedDateStr(formData.data);
+      if (created.googleEventId) {
+        toast.success("Agendamento criado e sincronizado no Google Calendar!");
+      } else {
+        toast.success("Agendamento registrado com sucesso!");
+      }
       setFormData({
         titulo: "",
         tipo: "entrega_pedido",
@@ -190,10 +246,11 @@ export function Calendario() {
         horario: "14:00",
         responsavel: "",
         cliente: "",
-        descricao: ""
+        descricao: "",
+        syncGoogle: true
       });
     } catch (err) {
-      alert("Erro ao salvar agendamento: " + err.message);
+      toast.error("Erro ao salvar agendamento: " + err.message);
     } finally {
       setFormSaving(false);
     }
@@ -238,6 +295,24 @@ export function Calendario() {
         </div>
 
         <div className="flex items-center gap-2">
+          {googleConnected ? (
+            <Badge variant="success" className="bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 py-1.5 px-3 flex items-center gap-1.5 text-xs">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
+              <span>Google Calendar Ativo</span>
+            </Badge>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleConnectGoogle}
+              disabled={connectingGoogle}
+              className="text-xs text-purple-700 border-purple-200 hover:bg-purple-50 flex items-center gap-1.5"
+            >
+              <CalendarIcon className="w-3.5 h-3.5 text-purple-600" />
+              <span>{connectingGoogle ? "Conectando..." : "Conectar Google Agenda"}</span>
+            </Button>
+          )}
+
           <Button
             variant="outline"
             size="sm"
@@ -563,6 +638,36 @@ export function Calendario() {
                         {evt.descricao}
                       </p>
                     )}
+
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                      {evt.googleHtmlLink ? (
+                        <a
+                          href={evt.googleHtmlLink}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-purple-600 hover:text-purple-800 hover:underline"
+                        >
+                          <CalendarIcon className="w-3 h-3" />
+                          <span>Ver no Google Agenda</span>
+                        </a>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleSyncEvent(evt)}
+                          disabled={syncingGoogleId === evt.id}
+                          className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-600 hover:text-purple-700 hover:bg-purple-50 px-2 py-1 rounded-md transition-colors border border-slate-200 cursor-pointer"
+                        >
+                          <CalendarIcon className="w-3 h-3 text-purple-600" />
+                          <span>
+                            {syncingGoogleId === evt.id
+                              ? "Sincronizando..."
+                              : isGoogleConnected()
+                              ? "Sincronizar no Google Calendar"
+                              : "Adicionar à Agenda Google"}
+                          </span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))
               )}
@@ -644,6 +749,24 @@ export function Calendario() {
               value={formData.descricao}
               onChange={(e) => setFormData({ ...formData, descricao: e.target.value })}
             />
+          </div>
+
+          <div className="p-3 bg-purple-50/70 border border-purple-100 rounded-xl space-y-1">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.syncGoogle !== false}
+                onChange={(e) => setFormData({ ...formData, syncGoogle: e.target.checked })}
+                className="rounded text-purple-600 focus:ring-purple-500 w-4 h-4 cursor-pointer"
+              />
+              <span className="text-xs text-purple-900 font-semibold flex items-center gap-1">
+                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                Sincronizar com Google Calendar da empresa (Cota Gratuita)
+              </span>
+            </label>
+            <p className="text-[11px] text-purple-600 pl-6">
+              Cria o evento na agenda com lembretes automáticos e marcação de cor por tipo de compromisso.
+            </p>
           </div>
 
           <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">

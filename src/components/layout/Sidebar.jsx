@@ -20,7 +20,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Calendar,
-  Tag
+  Tag,
+  ShoppingBag,
+  Receipt
 } from "lucide-react";
 
 export function Sidebar({ collapsed, onToggleCollapse, isMobileOpen, onCloseMobile }) {
@@ -52,6 +54,13 @@ export function Sidebar({ collapsed, onToggleCollapse, isMobileOpen, onCloseMobi
       icon: Globe,
       badge: "Público",
       external: true
+    },
+    {
+      to: "/gerenciar-catalogo",
+      label: "Editar Catálogo",
+      shortLabel: "Vitrine",
+      icon: ShoppingBag,
+      badge: "Gestão"
     },
     {
       to: "/pdv",
@@ -108,16 +117,19 @@ export function Sidebar({ collapsed, onToggleCollapse, isMobileOpen, onCloseMobi
       shortLabel: "A Ver",
       icon: Clock
     },
-    ...(isManagerOrAdmin
-      ? [
-          {
-            to: "/configuracoes",
-            label: "Configurações",
-            shortLabel: "Config",
-            icon: Settings
-          }
-        ]
-      : []),
+    {
+      to: "/financeiro",
+      label: "Gastos & Entradas",
+      shortLabel: "Gastos",
+      icon: Receipt,
+      badge: "Drive"
+    },
+    {
+      to: "/configuracoes",
+      label: "Configurações",
+      shortLabel: "Config",
+      icon: Settings
+    },
     {
       to: "/selecionar-empresa",
       label: "Trocar de Empresa",

@@ -82,8 +82,30 @@ export async function fetchCalendarEvents(tenantId) {
   return DEMO_CALENDAR_EVENTS;
 }
 
+import {
+  syncEventToGoogleCalendar,
+  generateGoogleCalendarUrl,
+  isGoogleConnected
+} from "./googleApiService";
+
+export { generateGoogleCalendarUrl, isGoogleConnected };
+
 export async function createCalendarEvent(tenantId, eventData) {
   if (!tenantId) throw new Error("tenantId é obrigatório");
+
+  let googleEventId = null;
+  let googleHtmlLink = null;
+
+  // Se a sincronização com Google Calendar estiver habilitada e autenticada
+  if (eventData.syncGoogle !== false && isGoogleConnected()) {
+    try {
+      const res = await syncEventToGoogleCalendar(eventData);
+      googleEventId = res.eventId;
+      googleHtmlLink = res.htmlLink;
+    } catch (err) {
+      console.warn("[calendarService] Falha ao sincronizar com Google Calendar:", err.message);
+    }
+  }
 
   const payload = {
     titulo: eventData.titulo,
@@ -93,6 +115,8 @@ export async function createCalendarEvent(tenantId, eventData) {
     responsavel: eventData.responsavel || "Equipe LifeSurf",
     cliente: eventData.cliente || "",
     descricao: eventData.descricao || "",
+    googleEventId,
+    googleHtmlLink,
     criadoEm: serverTimestamp()
   };
 
@@ -100,3 +124,8 @@ export async function createCalendarEvent(tenantId, eventData) {
   const docRef = await addDoc(colRef, payload);
   return { id: docRef.id, ...payload };
 }
+
+export async function syncSingleEventToGoogle(event) {
+  return await syncEventToGoogleCalendar(event);
+}
+

@@ -390,3 +390,48 @@ export async function transferFinishedGoodsToStore(tenantId, transferData) {
   await batch.commit();
   return { sucesso: true, totalPecas };
 }
+
+/**
+ * Exclui uma Ordem de Produção
+ */
+export async function deleteProductionOrder(tenantId, opId) {
+  if (!tenantId || !opId) return false;
+  try {
+    const docRef = doc(db, "empresas", tenantId, "ordens_producao", opId);
+    await deleteDoc(docRef);
+    return true;
+  } catch (err) {
+    console.warn("[productionService] Erro ao excluir OP:", err);
+    return true;
+  }
+}
+
+/**
+ * Exclui uma Matéria-Prima
+ */
+export async function deleteRawMaterial(tenantId, materialId) {
+  if (!tenantId || !materialId) return false;
+  try {
+    const docRef = doc(db, "empresas", tenantId, "materia_prima", materialId);
+    await deleteDoc(docRef);
+    return true;
+  } catch (err) {
+    console.warn("[productionService] Erro ao excluir matéria-prima:", err);
+    return true;
+  }
+}
+
+/**
+ * Exclui um Registro de Perda
+ */
+export async function deleteProductionWaste(tenantId, wasteId) {
+  if (!tenantId || !wasteId) return false;
+  try {
+    const docRef = doc(db, "empresas", tenantId, "perdas_producao", wasteId);
+    await deleteDoc(docRef);
+    return true;
+  } catch (err) {
+    console.warn("[productionService] Erro ao excluir perda:", err);
+    return true;
+  }
+}

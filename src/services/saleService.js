@@ -86,6 +86,29 @@ export async function executeSale(tenantId, saleData) {
     };
 
     transaction.set(newSaleDocRef, payload);
+
+    // 4. Se a venda for A Prazo ("A Ver" / Fiado), registra automaticamente o título a receber
+    if (saleData.formaPagamento === "prazo") {
+      const recCol = collection(db, "empresas", tenantId, "contas_receber");
+      const recDocRef = doc(recCol);
+      const hojeStr = agora.toISOString().split("T")[0];
+      const vencimento = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
+      transaction.set(recDocRef, {
+        numeroDocumento: `TIT-${numeroVenda}`,
+        origemVendaId: newSaleDocRef.id,
+        cliente: saleData.cliente || { nome: "Consumidor Final" },
+        descricao: `Venda PDV #${numeroVenda} (${saleData.itens?.length || 1} itens)`,
+        valorOriginal: Number(saleData.total) || 0,
+        valorPago: 0,
+        saldoRestante: Number(saleData.total) || 0,
+        dataVenda: hojeStr,
+        dataVencimento: vencimento,
+        status: "pendente",
+        historicoPagamentos: [],
+        empresaId: tenantId,
+        criadoEm: serverTimestamp()
+      });
+    }
   });
 
   // 4. Atualiza os contadores agregados (Regra Blaze: 0 leituras, incremento atômico no servidor)

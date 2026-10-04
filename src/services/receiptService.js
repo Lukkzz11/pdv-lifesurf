@@ -88,7 +88,15 @@ export function printThermalReceipt(receiptData, storeInfo = {}) {
         <div>${storeInfo.cidade || "Fortaleza - CE"}</div>
         ${storeInfo.cnpj ? `<div>CNPJ: ${storeInfo.cnpj}</div>` : ""}
         ${storeInfo.telefone ? `<div>WhatsApp / Tel: ${storeInfo.telefone}</div>` : ""}
-        <div class="badge-nao-fiscal bold">CUPOM NÃO FISCAL</div>
+        ${
+          receiptData.modoContingencia
+            ? `<div style="margin: 6px 0; border: 2px dashed #000; padding: 4px 2px; font-weight: bold; font-size: 10px; background: #f3f3f3;">
+                *** EMITIDO EM MODO CONTINGÊNCIA (OFFLINE) ***<br/>
+                AUTORIZADO PARA FRENTE DE CAIXA<br/>
+                SINCRONIZAÇÃO PENDENTE COM NUVEM
+               </div>`
+            : `<div class="badge-nao-fiscal bold">CUPOM NÃO FISCAL</div>`
+        }
       </div>
 
       <div class="divider"></div>
@@ -148,6 +156,11 @@ export function printThermalReceipt(receiptData, storeInfo = {}) {
 
       <div class="text-center" style="margin-top: 8px;">
         <div>${storeInfo.mensagemRodape || "OBRIGADO PELA PREFERÊNCIA! VOLTE SEMPRE!"}</div>
+        ${
+          receiptData.modoContingencia
+            ? `<div style="font-size: 9px; font-weight: bold; margin-top: 4px;">*** PROTOCOLO OFFLINE: ${receiptData.numeroVenda} ***</div>`
+            : ""
+        }
         <small style="color: #666; display: block; margin-top: 4px;">LifeSurf PDV v2 • Impresso em 80mm</small>
       </div>
 

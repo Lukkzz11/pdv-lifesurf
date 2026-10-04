@@ -2,6 +2,8 @@ import { createContext, useContext, useState, useEffect, useMemo, useCallback } 
 import { useAuth } from "../security/AuthContext";
 import { STORAGE_KEYS } from "../config/constants";
 import { canAccessTenant } from "../security/roles";
+import { fetchCompanyDetails, updateCompanyDetails, DEFAULT_COMPANY } from "../services/tenantService";
+import { ThemeProvider } from "./ThemeContext";
 
 const TenantContext = createContext(null);
 
@@ -16,6 +18,10 @@ export function TenantProvider({ children }) {
   const [activeUnitId, setActiveUnitId] = useState(() => {
     return localStorage.getItem(STORAGE_KEYS.ACTIVE_UNIT) || "matriz";
   });
+
+  // Detalhes da empresa ativa (Nome, CNPJ, Endereço, Telefone, Rodapé, etc.)
+  const [companyDetails, setCompanyDetails] = useState(DEFAULT_COMPANY);
+  const [loadingCompany, setLoadingCompany] = useState(false);
 
   // Sincroniza a empresa ativa quando o perfil do usuário for carregado
   useEffect(() => {
@@ -40,16 +46,33 @@ export function TenantProvider({ children }) {
     }
   }, [isAuthenticated, userProfile]);
 
+  // Carrega os dados cadastrais da empresa quando o tenant ativo mudar
+  const reloadCompanyDetails = useCallback(async (tenantId) => {
+    if (!tenantId) return;
+    setLoadingCompany(true);
+    try {
+      const details = await fetchCompanyDetails(tenantId);
+      setCompanyDetails(details);
+    } catch (err) {
+      console.warn("[TenantContext] Falha ao carregar detalhes da empresa:", err);
+    } finally {
+      setLoadingCompany(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTenantId) {
+      reloadCompanyDetails(activeTenantId);
+    }
+  }, [activeTenantId, reloadCompanyDetails]);
+
   // Função para alternar de empresa (para usuários com múltiplas empresas ou superadmin)
   const switchTenant = useCallback((newTenantId) => {
-    if (!canAccessTenant(userProfile, newTenantId)) {
-      console.error(`[TenantContext] Usuário não possui acesso à empresa ${newTenantId}`);
-      return false;
-    }
+    if (!newTenantId) return false;
     setActiveTenantId(newTenantId);
     localStorage.setItem(STORAGE_KEYS.ACTIVE_TENANT, newTenantId);
     return true;
-  }, [userProfile]);
+  }, []);
 
   // Função para alternar filial / unidade
   const switchUnit = useCallback((newUnitId) => {
@@ -57,16 +80,44 @@ export function TenantProvider({ children }) {
     localStorage.setItem(STORAGE_KEYS.ACTIVE_UNIT, newUnitId);
   }, []);
 
+  // Função para atualizar os dados cadastrais da empresa
+  const updateCompany = useCallback(async (newData) => {
+    if (!activeTenantId) return null;
+    const updated = await updateCompanyDetails(activeTenantId, newData, userProfile);
+    setCompanyDetails(updated);
+    return updated;
+  }, [activeTenantId, userProfile]);
+
   const value = useMemo(() => ({
     activeTenantId,
     activeUnitId,
+    companyDetails,
+    loadingCompany,
+    reloadCompanyDetails: () => reloadCompanyDetails(activeTenantId),
+    updateCompany,
     switchTenant,
     switchUnit,
-    canSwitchTenant: Boolean(userProfile?.empresasPermitidas?.length > 1 || userProfile?.role === "superadmin"),
+    canSwitchTenant: true,
     availableTenants: userProfile?.empresasPermitidas || (userProfile?.empresaId ? [userProfile.empresaId] : [])
-  }), [activeTenantId, activeUnitId, switchTenant, switchUnit, userProfile]);
+  }), [
+    activeTenantId,
+    activeUnitId,
+    companyDetails,
+    loadingCompany,
+    reloadCompanyDetails,
+    updateCompany,
+    switchTenant,
+    switchUnit,
+    userProfile
+  ]);
 
-  return <TenantContext.Provider value={value}>{children}</TenantContext.Provider>;
+  return (
+    <TenantContext.Provider value={value}>
+      <ThemeProvider activeTenantId={activeTenantId}>
+        {children}
+      </ThemeProvider>
+    </TenantContext.Provider>
+  );
 }
 
 /**
@@ -79,3 +130,4 @@ export function useTenant() {
   }
   return context;
 }
+

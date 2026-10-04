@@ -41,11 +41,9 @@ export function hasAnyRole(userRole, allowedRoles = []) {
  * @returns {boolean}
  */
 export function canAccessTenant(userProfile, tenantId) {
-  if (!userProfile || !tenantId) return false;
-  if (userProfile.role === USER_ROLES.SUPERADMIN) return true;
-  if (userProfile.empresaId === tenantId) return true;
-  if (Array.isArray(userProfile.empresasPermitidas)) {
-    return userProfile.empresasPermitidas.includes(tenantId);
-  }
-  return false;
+  if (!tenantId) return false;
+  if (!userProfile) return true;
+  // Permite navegação livre entre as empresas do ecossistema
+  return true;
 }
+

@@ -10,7 +10,8 @@ import {
 } from "../services/orderService";
 import {
   generateOrderPickingListPDF,
-  printThermalPickingList
+  printThermalPickingList,
+  uploadPickingListToGoogleDriveManual
 } from "../services/pickingListService";
 import {
   openWhatsAppChat,
@@ -18,6 +19,13 @@ import {
   playOrderAlertSound,
   sendLocalPushNotification
 } from "../services/notificationService";
+import {
+  isGoogleConnected,
+  sendOrderCreatedEmail,
+  sendOrderStatusUpdateEmail
+} from "../services/googleApiService";
+import { fetchStockProducts } from "../services/stockService";
+import toast from "react-hot-toast";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
@@ -56,13 +64,17 @@ import {
   Phone,
   Tag,
   Package,
+  Barcode,
   Check,
   AlertTriangle,
-  RotateCcw
+  RotateCcw,
+  Mail,
+  Cloud,
+  ExternalLink
 } from "lucide-react";
 
 export default function Pedidos() {
-  const { activeTenantId } = useTenant();
+  const { activeTenantId, companyDetails } = useTenant();
 
   const [pedidos, setPedidos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -80,12 +92,20 @@ export default function Pedidos() {
   const [modalNovoAberto, setModalNovoAberto] = useState(false);
   const [clienteNome, setClienteNome] = useState("");
   const [clienteTelefone, setClienteTelefone] = useState("");
+  const [clienteEmail, setClienteEmail] = useState("");
   const [origem, setOrigem] = useState("whatsapp");
   const [observacoes, setObservacoes] = useState("");
-  const [itensNovoPedido, setItensNovoPedido] = useState([
-    { nome: "", tamanho: "M", cor: "Preto", quantidade: 1, precoUnitario: "" }
-  ]);
+  const [itensNovoPedido, setItensNovoPedido] = useState([]);
   const [salvandoNovoPedido, setSalvandoNovoPedido] = useState(false);
+
+  // Catálogo de Produtos do Estoque da Loja para busca rápida
+  const [produtosLoja, setProdutosLoja] = useState([]);
+  const [carregandoEstoque, setCarregandoEstoque] = useState(false);
+  const [termoBuscaProduto, setTermoBuscaProduto] = useState("");
+  const [resultadoBuscaProdutos, setResultadoBuscaProdutos] = useState([]);
+  const [mostrarSugestoes, setMostrarSugestoes] = useState(false);
+  const [itemSelecionadoIndex, setItemSelecionadoIndex] = useState(-1);
+  const inputBuscaRef = useRef(null);
 
   // Modal Detalhes do Pedido
   const [pedidoSelecionado, setPedidoSelecionado] = useState(null);
@@ -93,6 +113,8 @@ export default function Pedidos() {
   // Modal de Aviso de Separação Concluída (com download do PDF)
   const [modalSeparacaoAberto, setModalSeparacaoAberto] = useState(false);
   const [pedidoSeparadoRecente, setPedidoSeparadoRecente] = useState(null);
+  const [salvandoDriveSeparacao, setSalvandoDriveSeparacao] = useState(false);
+  const [driveLinkSeparacao, setDriveLinkSeparacao] = useState(null);
   const pedidosIniciaisCarregadosRef = useRef(false);
   const qtdPedidosAnteriorRef = useRef(0);
 
@@ -130,6 +152,51 @@ export default function Pedidos() {
 
     return () => unsubscribe();
   }, [activeTenantId]);
+
+  // 1.1 CARREGAMENTO DO ESTOQUE DA LOJA PARA BUSCA RÁPIDA
+  useEffect(() => {
+    if (!activeTenantId) return;
+    let isMounted = true;
+    setCarregandoEstoque(true);
+    fetchStockProducts(activeTenantId, "loja", 300)
+      .then((prods) => {
+        if (isMounted) {
+          setProdutosLoja(prods || []);
+          setCarregandoEstoque(false);
+        }
+      })
+      .catch((err) => {
+        console.warn("[Pedidos] Erro ao carregar estoque da loja:", err);
+        if (isMounted) setCarregandoEstoque(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [activeTenantId]);
+
+  // 1.2 FILTRO EM TEMPO REAL DE PRODUTOS DO ESTOQUE (CÓDIGO, NOME, CÓDIGO DE BARRAS)
+  useEffect(() => {
+    if (!termoBuscaProduto.trim()) {
+      setResultadoBuscaProdutos([]);
+      setItemSelecionadoIndex(-1);
+      return;
+    }
+    const termoLimpo = termoBuscaProduto.trim().toLowerCase();
+    const filtrados = produtosLoja.filter((p) => {
+      const nome = (p.nome || "").toLowerCase();
+      const ref = (p.referencia || "").toLowerCase();
+      const barras = (p.codigoBarras || "").toLowerCase();
+      const id = (p.id || "").toLowerCase();
+      return (
+        nome.includes(termoLimpo) ||
+        ref.includes(termoLimpo) ||
+        barras.includes(termoLimpo) ||
+        id.includes(termoLimpo)
+      );
+    });
+    setResultadoBuscaProdutos(filtrados.slice(0, 10));
+    setItemSelecionadoIndex(filtrados.length > 0 ? 0 : -1);
+  }, [termoBuscaProduto, produtosLoja]);
 
   // Função centralizada para abrir conversa no WhatsApp com templates
   const abrirWhatsAppCliente = (telefone, numeroPedido, template = WHATSAPP_TEMPLATES.PEDIDO_CONFIRMADO, dados = {}) => {
@@ -193,15 +260,27 @@ export default function Pedidos() {
     try {
       await updateOrderStatus(activeTenantId, pedido.id, novoStatus);
 
+      // Disparo automático via Gmail API (Free Tier) caso o cliente tenha e-mail
+      if (pedido.cliente?.email && isGoogleConnected()) {
+        sendOrderStatusUpdateEmail(pedido, novoStatus, companyDetails)
+          .then(() => {
+            toast.success(`E-mail de atualização (${novoStatus}) enviado via Gmail API!`);
+          })
+          .catch((err) => {
+            console.warn("[Pedidos] Falha ao enviar e-mail transacional:", err);
+          });
+      }
+
       // REGRA: Ao marcar o pedido como "SEPARADO", dispara a rotina do PDF de Separação
       if (novoStatus === ORDER_STATUS.SEPARADO) {
         setPedidoSeparadoRecente({ ...pedido, status: novoStatus });
+        setDriveLinkSeparacao(null);
         setModalSeparacaoAberto(true);
 
-        // Gera e faz download imediato do PDF oficial da Lista de Separação
+        // Gera e faz download imediato do PDF oficial da Lista de Separação (e upload no Drive se conectado)
         generateOrderPickingListPDF(
           { ...pedido, status: novoStatus },
-          {
+          companyDetails || {
             nome: "LIFESURF CONFECÇÕES & SURFWEAR",
             cidade: "Fortaleza - CE"
           }
@@ -209,7 +288,7 @@ export default function Pedidos() {
       }
     } catch (err) {
       console.error("[Pedidos] Falha ao atualizar status do pedido:", err);
-      alert("Erro ao sincronizar status do pedido com o Firestore.");
+      toast.error("Erro ao sincronizar status do pedido com o Firestore.");
     }
   };
 
@@ -264,16 +343,15 @@ export default function Pedidos() {
     setCardArrastadoId(null);
   };
 
-  // 5. MANIPULAÇÃO DE ITENS NO FORMULÁRIO DE NOVO PEDIDO
+  // 5. MANIPULAÇÃO DE ITENS NO FORMULÁRIO DE NOVO PEDIDO (INTEGRADO AO ESTOQUE DA LOJA)
   const adicionarItemNovoPedido = () => {
     setItensNovoPedido((prev) => [
       ...prev,
-      { nome: "", tamanho: "M", cor: "Preto", quantidade: 1, precoUnitario: "" }
+      { nome: "", tamanho: "M", cor: "Preto", quantidade: 1, precoUnitario: "", produtoId: null }
     ]);
   };
 
   const removerItemNovoPedido = (index) => {
-    if (itensNovoPedido.length <= 1) return;
     setItensNovoPedido((prev) => prev.filter((_, i) => i !== index));
   };
 
@@ -283,7 +361,109 @@ export default function Pedidos() {
     );
   };
 
+  // Adiciona produto vindo da pesquisa direta do estoque da loja
+  const handleAdicionarProdutoEstoque = (produto, tamanhoEscolhido = null) => {
+    if (!produto) return;
+
+    let tamanho = tamanhoEscolhido;
+    if (!tamanho) {
+      if (produto.gradeTamanhos && Object.keys(produto.gradeTamanhos).length > 0) {
+        const comEstoque = Object.entries(produto.gradeTamanhos).find(([_, q]) => Number(q) > 0);
+        tamanho = comEstoque ? comEstoque[0] : Object.keys(produto.gradeTamanhos)[0];
+      } else {
+        tamanho = "M";
+      }
+    }
+
+    const cor = (produto.cores && produto.cores.length > 0)
+      ? (Array.isArray(produto.cores) ? produto.cores[0] : produto.cores)
+      : "Padrão";
+
+    // Prioriza o valor de atacado conforme solicitado
+    const preco = Number(produto.precoAtacado ?? produto.precoVarejo ?? produto.preco ?? produto.precoVenda ?? 0);
+
+    setItensNovoPedido((prev) => {
+      // Remove item vazio temporário inicial se houver
+      const itensReais = prev.filter((it) => (it.nome && it.nome.trim() !== "") || it.produtoId);
+
+      const indexExistente = itensReais.findIndex(
+        (it) => it.produtoId === produto.id && it.tamanho === tamanho
+      );
+
+      if (indexExistente >= 0) {
+        return itensReais.map((it, i) =>
+          i === indexExistente ? { ...it, quantidade: Number(it.quantidade) + 1 } : it
+        );
+      }
+
+      return [
+        ...itensReais,
+        {
+          produtoId: produto.id,
+          referencia: produto.referencia || "",
+          codigoBarras: produto.codigoBarras || "",
+          nome: produto.nome || "Produto da Loja",
+          tamanho,
+          cor,
+          quantidade: 1,
+          precoUnitario: preco,
+          gradeTamanhos: produto.gradeTamanhos || null,
+          coresDisponiveis: Array.isArray(produto.cores) ? produto.cores : []
+        }
+      ];
+    });
+
+    toast.success(`"${produto.nome}" (${tamanho}) adicionado com valor de atacado ${formatCurrency(preco)}!`, {
+      icon: "🛍️",
+      duration: 2500
+    });
+    setTermoBuscaProduto("");
+    setMostrarSugestoes(false);
+    if (inputBuscaRef.current) {
+      inputBuscaRef.current.focus();
+    }
+  };
+
+  const handleKeyDownBusca = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const termoLimpo = termoBuscaProduto.trim();
+      if (!termoLimpo) return;
+
+      // 1. Tenta correspondência exata por código de barras ou referência
+      const matchExato = produtosLoja.find(
+        (p) =>
+          p.codigoBarras === termoLimpo ||
+          (p.referencia && p.referencia.toLowerCase() === termoLimpo.toLowerCase())
+      );
+
+      if (matchExato) {
+        handleAdicionarProdutoEstoque(matchExato);
+        return;
+      }
+
+      // 2. Se houver resultados filtrados
+      if (resultadoBuscaProdutos.length > 0) {
+        const idx = itemSelecionadoIndex >= 0 ? itemSelecionadoIndex : 0;
+        handleAdicionarProdutoEstoque(resultadoBuscaProdutos[idx]);
+      } else {
+        toast.error(`Nenhum produto em estoque para "${termoLimpo}"`);
+      }
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setItemSelecionadoIndex((prev) =>
+        prev < resultadoBuscaProdutos.length - 1 ? prev + 1 : prev
+      );
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setItemSelecionadoIndex((prev) => (prev > 0 ? prev - 1 : 0));
+    } else if (e.key === "Escape") {
+      setMostrarSugestoes(false);
+    }
+  };
+
   const totalCalculadoNovoPedido = itensNovoPedido.reduce((acc, it) => {
+    if (!it.nome.trim() && !it.produtoId) return acc;
     const qtd = Number(it.quantidade) || 1;
     const preco = Number(it.precoUnitario) || 0;
     return acc + qtd * preco;
@@ -296,10 +476,22 @@ export default function Pedidos() {
       return;
     }
 
+    const itensValidos = itensNovoPedido.filter(
+      (it) => (it.nome && it.nome.trim() !== "") || it.produtoId
+    );
+
+    if (itensValidos.length === 0) {
+      toast.error("Adicione pelo menos um produto do estoque ou peça ao pedido.");
+      return;
+    }
+
     setSalvandoNovoPedido(true);
     try {
-      const itensFormatados = itensNovoPedido.map((it) => ({
-        nome: it.nome.trim() || "Camiseta Personalizada LifeSurf",
+      const itensFormatados = itensValidos.map((it) => ({
+        produtoId: it.produtoId || null,
+        referencia: it.referencia || "",
+        codigoBarras: it.codigoBarras || "",
+        nome: it.nome.trim() || "Produto LifeSurf",
         tamanho: it.tamanho || "M",
         cor: it.cor || "Padrão",
         quantidade: Math.max(1, Number(it.quantidade) || 1),
@@ -307,29 +499,51 @@ export default function Pedidos() {
         subtotal: (Math.max(1, Number(it.quantidade) || 1)) * (Number(it.precoUnitario) || 0)
       }));
 
-      await createOrder(activeTenantId, {
+      const totalCalculado = itensFormatados.reduce((acc, it) => acc + it.subtotal, 0);
+
+      const novoPedidoPayload = {
         cliente: {
           nome: clienteNome.trim(),
-          telefone: clienteTelefone.trim()
+          telefone: clienteTelefone.trim(),
+          email: clienteEmail.trim()
         },
         origem,
         observacoes,
-        total: totalCalculadoNovoPedido,
-        subtotal: totalCalculadoNovoPedido,
+        total: totalCalculado,
+        subtotal: totalCalculado,
         itens: itensFormatados,
         status: ORDER_STATUS.NOVO
-      });
+      };
 
+      const pedidoCriado = await createOrder(activeTenantId, novoPedidoPayload);
+
+      // Disparo automático via Gmail API (Free Tier) se o cliente possuir e-mail
+      if (clienteEmail.trim() && isGoogleConnected()) {
+        sendOrderCreatedEmail(
+          { ...pedidoCriado, ...novoPedidoPayload },
+          companyDetails
+        )
+          .then(() => {
+            toast.success(`E-mail de confirmação enviado para ${clienteEmail.trim()} via Gmail API!`);
+          })
+          .catch((err) => {
+            console.warn("[Pedidos] Falha ao disparar e-mail de novo pedido:", err);
+          });
+      }
+
+      toast.success("Pedido cadastrado com sucesso!");
       setModalNovoAberto(false);
       setClienteNome("");
       setClienteTelefone("");
+      setClienteEmail("");
       setObservacoes("");
-      setItensNovoPedido([
-        { nome: "", tamanho: "M", cor: "Preto", quantidade: 1, precoUnitario: "" }
-      ]);
+      setItensNovoPedido([]);
+      setTermoBuscaProduto("");
+      setResultadoBuscaProdutos([]);
+      setMostrarSugestoes(false);
     } catch (err) {
       console.error("[Pedidos] Falha ao cadastrar pedido:", err);
-      alert("Erro ao salvar novo pedido no Firestore.");
+      toast.error("Erro ao salvar novo pedido no Firestore.");
     } finally {
       setSalvandoNovoPedido(false);
     }
@@ -390,7 +604,16 @@ export default function Pedidos() {
 
           <Button
             variant="primary"
-            onClick={() => setModalNovoAberto(true)}
+            onClick={() => {
+              setItensNovoPedido([]);
+              setTermoBuscaProduto("");
+              setMostrarSugestoes(false);
+              setClienteNome("");
+              setClienteTelefone("");
+              setClienteEmail("");
+              setObservacoes("");
+              setModalNovoAberto(true);
+            }}
             leftIcon={<Plus className="w-4 h-4" />}
           >
             Novo Pedido
@@ -783,9 +1006,52 @@ export default function Pedidos() {
                 {formatCurrency(pedidoSeparadoRecente?.total || 0)}
               </span>
             </div>
+
+            {driveLinkSeparacao && (
+              <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-lg flex items-center justify-between text-xs text-emerald-300 mt-2">
+                <span className="flex items-center gap-1.5 font-medium">
+                  <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+                  Salvo no Google Drive da Empresa
+                </span>
+                <a
+                  href={driveLinkSeparacao}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline font-bold hover:text-emerald-200 flex items-center gap-1"
+                >
+                  Abrir no Drive <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            )}
           </div>
         </ModalBody>
         <ModalFooter>
+          <Button
+            variant="outline"
+            onClick={async () => {
+              if (pedidoSeparadoRecente) {
+                setSalvandoDriveSeparacao(true);
+                try {
+                  const res = await uploadPickingListToGoogleDriveManual(
+                    pedidoSeparadoRecente,
+                    companyDetails
+                  );
+                  setDriveLinkSeparacao(res.webViewLink);
+                  toast.success("Lista salva na pasta segura do Google Drive!");
+                } catch (err) {
+                  toast.error("Erro ao salvar no Drive: " + err.message);
+                } finally {
+                  setSalvandoDriveSeparacao(false);
+                }
+              }
+            }}
+            isLoading={salvandoDriveSeparacao}
+            leftIcon={<Cloud className="w-4 h-4 text-emerald-400" />}
+            className="border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10"
+          >
+            {driveLinkSeparacao ? "Salvo no Drive ✓" : "Salvar no Google Drive"}
+          </Button>
+
           <Button
             variant="outline"
             onClick={() => {
@@ -797,13 +1063,13 @@ export default function Pedidos() {
             }}
             leftIcon={<Printer className="w-4 h-4" />}
           >
-            Imprimir Bobina (80mm)
+            Bobina (80mm)
           </Button>
           <Button
             variant="primary"
             onClick={() => {
               if (pedidoSeparadoRecente) {
-                generateOrderPickingListPDF(pedidoSeparadoRecente, {
+                generateOrderPickingListPDF(pedidoSeparadoRecente, companyDetails || {
                   nome: "LIFESURF CONFECÇÕES"
                 });
               }
@@ -1002,6 +1268,51 @@ export default function Pedidos() {
               </div>
             )}
 
+            {/* Ações de E-mail Transacional via Gmail API (Free Tier) */}
+            {pedidoSelecionado.cliente?.email && (
+              <div className="p-3 bg-sky-950/20 border border-sky-500/30 rounded-xl space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-sky-400 flex items-center gap-1.5">
+                    <Mail className="w-4 h-4" />
+                    Notificar por E-mail (Gmail API):
+                  </span>
+                  <span className="text-slate-400 font-mono text-[11px] truncate max-w-[200px]">
+                    {pedidoSelecionado.cliente.email}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await sendOrderCreatedEmail(pedidoSelecionado, companyDetails);
+                        toast.success("E-mail de confirmação enviado via Gmail API!");
+                      } catch (e) {
+                        toast.error(e.message || "Erro ao enviar via Gmail API.");
+                      }
+                    }}
+                    className="p-2 rounded-lg bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 text-sky-300 text-[11px] font-semibold transition-colors cursor-pointer text-center"
+                  >
+                    Reenviar Confirmação
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await sendOrderStatusUpdateEmail(pedidoSelecionado, pedidoSelecionado.status, companyDetails);
+                        toast.success(`E-mail de status (${pedidoSelecionado.status}) enviado via Gmail API!`);
+                      } catch (e) {
+                        toast.error(e.message || "Erro ao enviar via Gmail API.");
+                      }
+                    }}
+                    className="p-2 rounded-lg bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 text-sky-300 text-[11px] font-semibold transition-colors cursor-pointer text-center"
+                  >
+                    Enviar Status Atual ({pedidoSelecionado.status})
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="flex justify-between items-center p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
               <span className="text-slate-400 font-medium">Total Consolidado:</span>
               <span className="text-xl font-black text-emerald-400 font-mono">
@@ -1052,9 +1363,9 @@ export default function Pedidos() {
           />
           <ModalBody className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="sm:col-span-2">
+              <div>
                 <Input
-                  label="Nome do Cliente"
+                  label="Nome do Cliente *"
                   required
                   placeholder="Ex: Carlos Eduardo"
                   value={clienteNome}
@@ -1068,6 +1379,16 @@ export default function Pedidos() {
                   placeholder="(85) 99999-8888"
                   value={clienteTelefone}
                   onChange={(e) => setClienteTelefone(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <Input
+                  type="email"
+                  label="E-mail (Notificações Gmail)"
+                  placeholder="cliente@email.com"
+                  value={clienteEmail}
+                  onChange={(e) => setClienteEmail(e.target.value)}
                 />
               </div>
             </div>
@@ -1094,111 +1415,306 @@ export default function Pedidos() {
             </div>
 
             {/* Grade de Itens do Pedido */}
-            <div className="space-y-2 pt-2 border-t border-slate-800">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-white uppercase tracking-wider">
-                  Itens da Confecção (Grade & Quantidade)
-                </span>
+            <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <span className="text-xs font-bold text-slate-800 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Package className="w-4 h-4 text-sky-500" />
+                    Itens do Pedido & Estoque da Loja
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block">
+                    {produtosLoja.length > 0
+                      ? `${produtosLoja.length} produtos carregados do estoque da loja`
+                      : "Carregando catálogo de produtos..."}
+                  </span>
+                </div>
                 <Button
                   variant="outline"
                   size="sm"
                   type="button"
                   onClick={adicionarItemNovoPedido}
                   leftIcon={<Plus className="w-3.5 h-3.5" />}
-                  className="text-xs h-7 px-2"
+                  className="text-xs h-7 px-2.5"
                 >
-                  Adicionar Peça
+                  + Peça Avulsa / Manual
                 </Button>
               </div>
 
-              <div className="space-y-2.5">
-                {itensNovoPedido.map((item, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3 rounded-xl bg-slate-950 border border-slate-800 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end"
-                  >
-                    <div className="sm:col-span-5">
-                      <label className="text-[11px] text-slate-400 block mb-1">
-                        Descrição da Peça #{idx + 1}
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="Ex: Camiseta Silk Surf Waves"
-                        value={item.nome}
-                        onChange={(e) => atualizarItemNovoPedido(idx, "nome", e.target.value)}
-                        className="w-full h-8 px-2.5 bg-slate-900 text-white rounded-lg border border-slate-800 text-xs focus:border-sky-500 focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="sm:col-span-2">
-                      <label className="text-[11px] text-slate-400 block mb-1">Tam.</label>
-                      <select
-                        value={item.tamanho}
-                        onChange={(e) => atualizarItemNovoPedido(idx, "tamanho", e.target.value)}
-                        className="w-full h-8 px-2 bg-slate-900 text-white rounded-lg border border-slate-800 text-xs focus:border-sky-500 focus:outline-none"
-                      >
-                        <option value="PP">PP</option>
-                        <option value="P">P</option>
-                        <option value="M">M</option>
-                        <option value="G">G</option>
-                        <option value="GG">GG</option>
-                        <option value="XG">XG</option>
-                        <option value="38">38</option>
-                        <option value="40">40</option>
-                        <option value="42">42</option>
-                        <option value="44">44</option>
-                        <option value="U">Único</option>
-                      </select>
-                    </div>
-
-                    <div className="sm:col-span-2">
-                      <label className="text-[11px] text-slate-400 block mb-1">Qtd.</label>
-                      <input
-                        type="number"
-                        min="1"
-                        required
-                        value={item.quantidade}
-                        onChange={(e) =>
-                          atualizarItemNovoPedido(idx, "quantidade", e.target.value)
-                        }
-                        className="w-full h-8 px-2 bg-slate-900 text-white rounded-lg border border-slate-800 text-xs text-center font-bold focus:border-sky-500 focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="sm:col-span-2">
-                      <label className="text-[11px] text-slate-400 block mb-1">Preço (R$)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        placeholder="89.90"
-                        required
-                        value={item.precoUnitario}
-                        onChange={(e) =>
-                          atualizarItemNovoPedido(idx, "precoUnitario", e.target.value)
-                        }
-                        className="w-full h-8 px-2 bg-slate-900 text-white rounded-lg border border-slate-800 text-xs text-right font-mono focus:border-sky-500 focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="sm:col-span-1 flex justify-center pb-0.5">
-                      <button
-                        type="button"
-                        onClick={() => removerItemNovoPedido(idx)}
-                        disabled={itensNovoPedido.length <= 1}
-                        className="text-slate-500 hover:text-rose-400 disabled:opacity-30 p-1"
-                      >
-                        <XCircle className="w-4 h-4" />
-                      </button>
-                    </div>
+              {/* BARRA DE PESQUISA DIRETO DO ESTOQUE DA LOJA */}
+              <div className="relative">
+                <div className="relative flex items-center">
+                  <div className="absolute left-3 pointer-events-none text-slate-400">
+                    <Barcode className="w-4 h-4 text-sky-500" />
                   </div>
-                ))}
+                  <input
+                    ref={inputBuscaRef}
+                    type="text"
+                    value={termoBuscaProduto}
+                    onChange={(e) => {
+                      setTermoBuscaProduto(e.target.value);
+                      setMostrarSugestoes(true);
+                    }}
+                    onFocus={() => {
+                      if (termoBuscaProduto.trim()) setMostrarSugestoes(true);
+                    }}
+                    onKeyDown={handleKeyDownBusca}
+                    placeholder="Pesquisar por Código, Nome ou Código de Barras (ex: CAM-01, 789... ou Silk Waves)..."
+                    className="w-full h-10 pl-9 pr-24 rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-700 text-xs focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 shadow-sm transition-all"
+                  />
+                  {termoBuscaProduto && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTermoBuscaProduto("");
+                        setMostrarSugestoes(false);
+                      }}
+                      className="absolute right-12 text-slate-400 hover:text-slate-600 dark:hover:text-white p-1 cursor-pointer"
+                    >
+                      <XCircle className="w-4 h-4" />
+                    </button>
+                  )}
+                  <div className="absolute right-2.5 hidden sm:flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500 font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
+                    <span>Enter</span>
+                  </div>
+                </div>
+
+                {/* SUGESTÕES DE AUTOCOMPLETE DO ESTOQUE */}
+                {mostrarSugestoes && termoBuscaProduto.trim() && (
+                  <div className="absolute z-50 left-0 right-0 mt-1 max-h-72 overflow-y-auto rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-1.5 space-y-1">
+                    <div className="px-2 py-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider flex items-center justify-between border-b border-slate-100 dark:border-slate-800 mb-1">
+                      <span>Produtos Encontrados no Estoque ({resultadoBuscaProdutos.length})</span>
+                      <span className="text-sky-500 dark:text-sky-400">Clique para adicionar</span>
+                    </div>
+
+                    {resultadoBuscaProdutos.length > 0 ? (
+                      resultadoBuscaProdutos.map((prod, pIdx) => {
+                        const isSelected = pIdx === itemSelecionadoIndex;
+                        const precoAtacado = Number(prod.precoAtacado ?? prod.precoVarejo ?? prod.preco ?? 0);
+                        const precoVarejo = Number(prod.precoVarejo ?? 0);
+                        const estoqueTotal = prod.estoqueLoja ?? prod.estoqueTotal ?? 0;
+                        const temGrade = prod.gradeTamanhos && Object.keys(prod.gradeTamanhos).length > 0;
+
+                        return (
+                          <div
+                            key={prod.id || pIdx}
+                            onClick={() => handleAdicionarProdutoEstoque(prod)}
+                            onMouseEnter={() => setItemSelecionadoIndex(pIdx)}
+                            className={cn(
+                              "p-2.5 rounded-lg flex items-center justify-between gap-3 cursor-pointer transition-colors text-xs",
+                              isSelected
+                                ? "bg-sky-50 dark:bg-sky-500/15 border border-sky-300 dark:border-sky-500/30"
+                                : "hover:bg-slate-50 dark:hover:bg-slate-800/60 border border-transparent"
+                            )}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-600 dark:text-sky-400 flex items-center justify-center shrink-0">
+                                <Package className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="font-bold text-slate-800 dark:text-white truncate flex items-center gap-1.5">
+                                  <span>{prod.nome}</span>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                  {prod.referencia && (
+                                    <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono">
+                                      Ref: {prod.referencia}
+                                    </span>
+                                  )}
+                                  {prod.codigoBarras && (
+                                    <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono">
+                                      {prod.codigoBarras}
+                                    </span>
+                                  )}
+                                  {temGrade && (
+                                    <span className="text-[10px] text-slate-400">
+                                      Grade: {Object.keys(prod.gradeTamanhos).join(", ")}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-3 shrink-0">
+                              <div className="text-right">
+                                <div className="font-extrabold text-amber-500 dark:text-amber-400 font-mono text-xs">
+                                  {formatCurrency(precoAtacado)} <span className="text-[9px] font-semibold text-slate-400">Atacado</span>
+                                </div>
+                                {precoVarejo > 0 && precoVarejo !== precoAtacado && (
+                                  <span className="text-[9px] text-slate-400 font-mono block">
+                                    Varejo: {formatCurrency(precoVarejo)}
+                                  </span>
+                                )}
+                                <span className={cn(
+                                  "text-[10px] font-mono block",
+                                  estoqueTotal > 0 ? "text-slate-500 dark:text-slate-400" : "text-amber-500"
+                                )}>
+                                  {estoqueTotal} un estoque
+                                </span>
+                              </div>
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                className="h-7 px-2.5 text-xs pointer-events-none bg-emerald-600 text-white font-bold"
+                              >
+                                + Add
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="p-3 text-center space-y-2">
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          Nenhum produto em estoque encontrado para <span className="font-semibold text-slate-800 dark:text-white">"{termoBuscaProduto}"</span>
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          type="button"
+                          onClick={() => {
+                            setItensNovoPedido((prev) => [
+                              ...prev.filter((it) => it.nome.trim() !== "" || it.produtoId),
+                              {
+                                nome: termoBuscaProduto.trim(),
+                                tamanho: "M",
+                                cor: "Preto",
+                                quantidade: 1,
+                                precoUnitario: "",
+                                produtoId: null
+                              }
+                            ]);
+                            setTermoBuscaProduto("");
+                            setMostrarSugestoes(false);
+                          }}
+                          leftIcon={<Plus className="w-3.5 h-3.5" />}
+                          className="text-xs"
+                        >
+                          Adicionar como item avulso "{termoBuscaProduto.trim()}"
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* LISTA DE ITENS DO PEDIDO */}
+              <div className="space-y-2.5">
+                {itensNovoPedido.length === 0 ? (
+                  <div className="p-6 rounded-xl border border-dashed border-slate-300 dark:border-slate-800 text-center space-y-1.5 bg-slate-50/50 dark:bg-slate-900/20">
+                    <Package className="w-8 h-8 mx-auto text-slate-400 dark:text-slate-600" />
+                    <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Nenhum produto adicionado ao pedido ainda
+                    </p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Digite o código, nome ou código de barras no campo acima para puxar direto do estoque da loja.
+                    </p>
+                  </div>
+                ) : (
+                  itensNovoPedido.map((item, idx) => {
+                    const gradeDisponivel = item.gradeTamanhos;
+                    const tamanhosOpcoes = gradeDisponivel && Object.keys(gradeDisponivel).length > 0
+                      ? Object.keys(gradeDisponivel)
+                      : ["PP", "P", "M", "G", "GG", "XG", "38", "40", "42", "44", "U"];
+
+                    return (
+                      <div
+                        key={idx}
+                        className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end shadow-sm"
+                      >
+                        <div className="sm:col-span-5">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                              Peça #{idx + 1}
+                            </label>
+                            {item.produtoId ? (
+                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-300 border border-sky-300 dark:border-sky-500/30">
+                                Estoque Loja {item.referencia ? `(${item.referencia})` : ""}
+                              </span>
+                            ) : (
+                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                                Avulso / Manual
+                              </span>
+                            )}
+                          </div>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Ex: Camiseta Silk Surf Waves"
+                            value={item.nome}
+                            onChange={(e) => atualizarItemNovoPedido(idx, "nome", e.target.value)}
+                            className="w-full h-8 px-2.5 bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-lg border border-slate-300 dark:border-slate-800 text-xs focus:border-sky-500 focus:outline-none"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 block mb-1">Tam.</label>
+                          <select
+                            value={item.tamanho}
+                            onChange={(e) => atualizarItemNovoPedido(idx, "tamanho", e.target.value)}
+                            className="w-full h-8 px-2 bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-lg border border-slate-300 dark:border-slate-800 text-xs focus:border-sky-500 focus:outline-none"
+                          >
+                            {tamanhosOpcoes.map((tam) => {
+                              const saldoGrade = gradeDisponivel ? gradeDisponivel[tam] : null;
+                              return (
+                                <option key={tam} value={tam}>
+                                  {tam} {saldoGrade !== null && saldoGrade !== undefined ? `(${saldoGrade} un)` : ""}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 block mb-1">Qtd.</label>
+                          <input
+                            type="number"
+                            min="1"
+                            required
+                            value={item.quantidade}
+                            onChange={(e) =>
+                              atualizarItemNovoPedido(idx, "quantidade", Math.max(1, Number(e.target.value) || 1))
+                            }
+                            className="w-full h-8 px-2 bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-lg border border-slate-300 dark:border-slate-800 text-xs text-center font-bold focus:border-sky-500 focus:outline-none"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 block mb-1">
+                            Preço Unit. (R$) - Editável
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="89.90"
+                            required
+                            value={item.precoUnitario}
+                            onChange={(e) =>
+                              atualizarItemNovoPedido(idx, "precoUnitario", e.target.value)
+                            }
+                            className="w-full h-8 px-2 bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-lg border border-slate-300 dark:border-slate-800 text-xs text-right font-mono focus:border-sky-500 focus:outline-none"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-1 flex justify-center pb-0.5">
+                          <button
+                            type="button"
+                            onClick={() => removerItemNovoPedido(idx)}
+                            className="text-slate-400 hover:text-rose-500 p-1 cursor-pointer transition-colors"
+                            title="Remover produto"
+                          >
+                            <XCircle className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
 
-            <div className="flex justify-between items-center p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
-              <span className="text-slate-400 font-medium">Total Calculado:</span>
-              <span className="text-xl font-black text-emerald-400 font-mono">
+            <div className="flex justify-between items-center p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs">
+              <span className="text-slate-500 dark:text-slate-400 font-medium">Total Calculado:</span>
+              <span className="text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
                 {formatCurrency(totalCalculadoNovoPedido)}
               </span>
             </div>

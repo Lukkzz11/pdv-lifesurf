@@ -11,8 +11,17 @@ import { Input } from "../components/ui/Input";
 import { Badge } from "../components/ui/Badge";
 import { Modal, ModalHeader, ModalBody, ModalFooter } from "../components/ui/Modal";
 import CloseCashierModal from "../components/cashier/CloseCashierModal";
+import ModalFilaOffline from "../components/pdv/ModalFilaOffline";
 import { formatCurrency } from "../utils/formatters";
 import { cn } from "../utils/cn";
+import {
+  isPdvOnline,
+  saveOfflineSale,
+  getPendingSalesCount,
+  syncOfflineSalesQueue,
+  OFFLINE_EVENT_QUEUE_UPDATED,
+  OFFLINE_EVENT_SYNC_FINISHED
+} from "../services/pdvOfflineService";
 import {
   ShoppingCart,
   Search,
@@ -35,7 +44,13 @@ import {
   Calculator,
   CornerDownLeft,
   Hash,
-  Save
+  Save,
+  Wifi,
+  WifiOff,
+  RefreshCw,
+  Send,
+  Lock,
+  Unlock
 } from "lucide-react";
 
 const TAXAS_CARTAO_CREDITO = {
@@ -49,22 +64,78 @@ const FORMAS_PAGTO_LISTA = ["dinheiro", "pix", "cartao_debito", "cartao_credito"
 
 export default function Pdv() {
   const { userProfile } = useAuth();
-  const { activeTenantId, activeUnitId } = useTenant();
+  const { activeTenantId, activeUnitId, companyDetails } = useTenant();
+
+  // Dados da Loja para Impressão de Cupom 80mm
+  const dadosLojaCupom = useMemo(() => ({
+    nome: companyDetails?.nome || "LIFESURF CONFECÇÕES & SURFWEAR",
+    cidade: companyDetails?.cidade ? `${companyDetails.cidade} - ${companyDetails.estado || "CE"}` : "Fortaleza - CE",
+    cnpj: companyDetails?.cnpj || "12.345.678/0001-90",
+    telefone: companyDetails?.telefone || "(85) 98888-7777",
+    mensagemRodape: companyDetails?.mensagemRodape || "OBRIGADO PELA PREFERÊNCIA! VOLTE SEMPRE!"
+  }), [companyDetails]);
 
   // Chave de persistência de venda em andamento
   const storageKey = `lifesurf_pdv_venda_${activeTenantId || "default"}`;
 
   // Produtos carregados da loja
+function consolidarItensCarrinho(itens) {
+  if (!Array.isArray(itens)) return [];
+  const consolidados = [];
+  itens.forEach((item) => {
+    const idx = consolidados.findIndex((c) => {
+      if (item.codigoBarras && c.codigoBarras && item.codigoBarras === c.codigoBarras) return true;
+      if (item.referencia && c.referencia && item.referencia === c.referencia) return true;
+      if (item.id && c.id && item.id === c.id) return true;
+      return item.key && c.key && item.key === c.key;
+    });
+    if (idx >= 0) {
+      consolidados[idx].quantidade += Number(item.quantidade) || 1;
+    } else {
+      consolidados.push({ ...item });
+    }
+  });
+  return consolidados;
+}
+
   const [produtosLoja, setProdutosLoja] = useState([]);
   const [loadingProdutos, setLoadingProdutos] = useState(true);
 
-  // 1. ESTADO DO CARRINHO COM PERSISTÊNCIA AUTOMÁTICA
+  // Status de Abertura / Fechamento de Caixa do PDV
+  const [caixaAberto, setCaixaAberto] = useState(() => {
+    try {
+      const savedStatus = localStorage.getItem(`lifesurf_caixa_aberto_${activeTenantId || "default"}`);
+      if (savedStatus === "fechado") return false;
+    } catch {}
+    return true;
+  });
+  const [modalAbrirCaixaAberto, setModalAbrirCaixaAberto] = useState(false);
+  const [trocoAberturaInput, setTrocoAberturaInput] = useState("100.00");
+
+  const handleAbrirCaixa = (e) => {
+    if (e) e.preventDefault();
+    try {
+      localStorage.setItem(`lifesurf_caixa_aberto_${activeTenantId || "default"}`, "aberto");
+      localStorage.setItem(`lifesurf_fundo_troco_${activeTenantId || "default"}`, String(trocoAberturaInput || "0"));
+      setCaixaAberto(true);
+      setModalAbrirCaixaAberto(false);
+      setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 100);
+    } catch (err) {
+      console.error(err);
+      setCaixaAberto(true);
+      setModalAbrirCaixaAberto(false);
+    }
+  };
+
+  // 1. ESTADO DO CARRINHO COM PERSISTÊNCIA AUTOMÁTICA & CONSOLIDAÇÃO DE ITENS COM MESMO CÓDIGO
   const [carrinho, setCarrinho] = useState(() => {
     try {
       const saved = localStorage.getItem(`lifesurf_pdv_venda_${activeTenantId || "default"}`);
       if (saved) {
         const parsed = JSON.parse(saved);
-        return Array.isArray(parsed.carrinho) ? parsed.carrinho : [];
+        return Array.isArray(parsed.carrinho) ? consolidarItensCarrinho(parsed.carrinho) : [];
       }
     } catch (e) {
       console.warn("Erro ao restaurar carrinho:", e);
@@ -159,6 +230,52 @@ export default function Pdv() {
 
   // 6. Fechamento de Caixa
   const [modalFecharCaixaAberto, setModalFecharCaixaAberto] = useState(false);
+
+  // 7. Modo Contingência & Fila Offline
+  const [isOnlineState, setIsOnlineState] = useState(isPdvOnline());
+  const [offlineCount, setOfflineCount] = useState(() => getPendingSalesCount(activeTenantId));
+  const [modalOfflineAberto, setModalOfflineAberto] = useState(false);
+  const [sincronizandoFila, setSincronizandoFila] = useState(false);
+
+  // Monitora alterações de rede e da fila offline
+  useEffect(() => {
+    const updateNetworkStatus = () => {
+      setIsOnlineState(isPdvOnline());
+      setOfflineCount(getPendingSalesCount(activeTenantId));
+    };
+
+    window.addEventListener("online", updateNetworkStatus);
+    window.addEventListener("offline", updateNetworkStatus);
+    window.addEventListener("pdv:network_status_changed", updateNetworkStatus);
+    window.addEventListener(OFFLINE_EVENT_QUEUE_UPDATED, updateNetworkStatus);
+    window.addEventListener(OFFLINE_EVENT_SYNC_FINISHED, updateNetworkStatus);
+
+    return () => {
+      window.removeEventListener("online", updateNetworkStatus);
+      window.removeEventListener("offline", updateNetworkStatus);
+      window.removeEventListener("pdv:network_status_changed", updateNetworkStatus);
+      window.removeEventListener(OFFLINE_EVENT_QUEUE_UPDATED, updateNetworkStatus);
+      window.removeEventListener(OFFLINE_EVENT_SYNC_FINISHED, updateNetworkStatus);
+    };
+  }, [activeTenantId]);
+
+  // Sincronização rápida das vendas offline pendentes
+  const handleSincronizarFilaRapido = async () => {
+    if (!isOnlineState || offlineCount === 0) return;
+    setSincronizandoFila(true);
+    try {
+      const res = await syncOfflineSalesQueue(activeTenantId);
+      if (res.synced > 0) {
+        alert(`${res.synced} venda(s) offline sincronizada(s) com sucesso no Firestore!`);
+        carregarProdutos();
+      }
+    } catch (err) {
+      alert("Erro ao sincronizar vendas offline: " + (err.message || "Erro desconhecido"));
+    } finally {
+      setSincronizandoFila(false);
+      setOfflineCount(getPendingSalesCount(activeTenantId));
+    }
+  };
 
   // Carrega produtos da loja
   const carregarProdutos = useCallback(async () => {
@@ -283,7 +400,20 @@ export default function Pdv() {
     const qtd = Math.max(1, parseInt(quantidadeInput, 10) || 1);
     const tamanhoFormatado = tamanhoEmProcesso === "SEM_TAMANHO" ? "Sem Tamanho" : tamanhoEmProcesso;
     const itemKey = `${produtoEmProcesso.id}-${tamanhoEmProcesso}`;
-    const itemExistenteIndex = carrinho.findIndex((it) => it.key === itemKey);
+    
+    // Procura item existente pelo mesmo código de barras, referência ou id do produto para somar
+    const itemExistenteIndex = carrinho.findIndex((it) => {
+      if (produtoEmProcesso.codigoBarras && it.codigoBarras && it.codigoBarras === produtoEmProcesso.codigoBarras) {
+        return true;
+      }
+      if (produtoEmProcesso.referencia && it.referencia && it.referencia === produtoEmProcesso.referencia) {
+        return true;
+      }
+      if (it.id === produtoEmProcesso.id) {
+        return true;
+      }
+      return it.key === itemKey;
+    });
 
     const precoVarejo = Number(produtoEmProcesso.precoVarejo) || 0;
     const precoAtacado = Number(produtoEmProcesso.precoAtacado) || precoVarejo;
@@ -512,11 +642,7 @@ export default function Pdv() {
           if (indiceSucessoFocado === 0) {
             // Reimprimir
             if (ultimaVendaFinalizada) {
-              printThermalReceipt(ultimaVendaFinalizada, {
-                nome: "LIFESURF CONFECÇÕES",
-                cidade: "Fortaleza - CE",
-                mensagemRodape: "OBRIGADO PELA PREFERÊNCIA!"
-              });
+              printThermalReceipt(ultimaVendaFinalizada, dadosLojaCupom);
             }
           } else {
             // Nova Venda
@@ -600,10 +726,27 @@ export default function Pdv() {
         unidadeId: activeUnitId || "matriz"
       };
 
-      // 1. Grava no Firestore com baixa atômica
-      const vendaGravada = await executeSale(activeTenantId, payloadVenda);
+      // 1. Grava no Firestore ou em Fila Local de Contingência (Anti-queda de internet)
+      let vendaGravada = null;
+      let gravouOffline = false;
 
-      // 2. Disparo Automático do Cupom Térmico (80mm)
+      if (!isPdvOnline()) {
+        vendaGravada = saveOfflineSale(activeTenantId, payloadVenda);
+        gravouOffline = true;
+      } else {
+        try {
+          vendaGravada = await executeSale(activeTenantId, payloadVenda);
+        } catch (nuvemErr) {
+          console.warn(
+            "[Pdv] Falha de conexão ao gravar no Firestore. Alternando automaticamente para contingência offline:",
+            nuvemErr
+          );
+          vendaGravada = saveOfflineSale(activeTenantId, payloadVenda);
+          gravouOffline = true;
+        }
+      }
+
+      // 2. Disparo Automático do Cupom Térmico (80mm) com indicador de contingência se aplicável
       printThermalReceipt(
         {
           numeroVenda: vendaGravada.numeroVenda,
@@ -615,15 +758,10 @@ export default function Pdv() {
           total: payloadVenda.total,
           formaPagamento,
           valorEntregue: payloadVenda.infoPagamento.valorEntregue,
-          troco: payloadVenda.infoPagamento.troco
+          troco: payloadVenda.infoPagamento.troco,
+          modoContingencia: gravouOffline
         },
-        {
-          nome: "LIFESURF CONFECÇÕES & SURFWEAR",
-          cidade: "Fortaleza - CE",
-          cnpj: "12.345.678/0001-90",
-          telefone: "(85) 98888-7777",
-          mensagemRodape: "OBRIGADO PELA PREFERÊNCIA! VOLTE SEMPRE!"
-        }
+        dadosLojaCupom
       );
 
       // 3. Efeito visual com confete
@@ -637,7 +775,10 @@ export default function Pdv() {
         // Fallback
       }
 
-      setUltimaVendaFinalizada(vendaGravada);
+      setUltimaVendaFinalizada({
+        ...vendaGravada,
+        modoContingencia: gravouOffline
+      });
       setModalPagamentoAberto(false);
       setIndiceSucessoFocado(1);
       setModalSucessoAberto(true);
@@ -648,8 +789,9 @@ export default function Pdv() {
       setValorRecebido("");
       localStorage.removeItem(storageKey);
 
-      // Recarrega produtos da loja
+      // Recarrega produtos da loja (se offline, já traz o saldo decrementado do cache local)
       carregarProdutos();
+      setOfflineCount(getPendingSalesCount(activeTenantId));
     } catch (err) {
       console.error("[Pdv] Falha ao processar venda:", err);
       alert("Erro ao gravar venda: " + (err.message || "Erro desconhecido"));
@@ -667,25 +809,99 @@ export default function Pdv() {
             <ShoppingCart className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
-              Frente de Caixa (PDV)
-              <Badge variant="success" size="sm" withDot={true} pulseDot={true}>
-                Caixa Operacional
-              </Badge>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+                Frente de Caixa (PDV)
+              </h1>
+
+              {/* Indicador de Status de Rede / Contingência */}
+              <button
+                type="button"
+                onClick={() => setModalOfflineAberto(true)}
+                className="cursor-pointer transition-transform hover:scale-105 outline-none"
+                title="Clique para gerenciar a Fila de Contingência e Modo Offline"
+              >
+                {isOnlineState ? (
+                  <Badge variant="success" size="sm" withDot={true}>
+                    Online (Nuvem)
+                  </Badge>
+                ) : (
+                  <Badge variant="warning" size="sm" withDot={true} pulseDot={true}>
+                    Modo Offline (Contingência)
+                  </Badge>
+                )}
+              </button>
+
+              {/* Contador de Vendas Offline Pendentes */}
+              {offlineCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setModalOfflineAberto(true)}
+                  className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 flex items-center gap-1.5 cursor-pointer transition-all animate-pulse"
+                  title="Vendas salvas no caixa aguardando sincronização com a nuvem"
+                >
+                  <Clock className="w-3 h-3 text-amber-400" />
+                  <span>{offlineCount} venda(s) na fila local</span>
+                </button>
+              )}
+
+              {/* Status do Caixa (Aberto / Fechado) */}
+              {caixaAberto ? (
+                <Badge variant="success" size="sm" withDot={true}>
+                  Caixa Aberto
+                </Badge>
+              ) : (
+                <Badge variant="danger" size="sm" withDot={true} pulseDot={true}>
+                  Caixa Fechado
+                </Badge>
+              )}
+
               {carrinho.length > 0 && (
                 <Badge variant="info" size="sm" withDot={true}>
                   Venda Salva (Anti-perda)
                 </Badge>
               )}
-            </h1>
+            </div>
             <span className="text-[11px] text-slate-400">
               Operador: <strong className="text-slate-200">{userProfile?.nome || "Caixa Geral"}</strong>
             </span>
           </div>
         </div>
 
-        {/* Alternador Varejo / Atacado e Fechar Caixa */}
-        <div className="flex items-center gap-2">
+        {/* Alternador Varejo / Atacado, Botão Fila Offline e Fechar Caixa */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Sincronização rápida em nuvem quando houver vendas na fila e internet disponível */}
+          {offlineCount > 0 && isOnlineState && (
+            <Button
+              variant="success"
+              size="sm"
+              onClick={handleSincronizarFilaRapido}
+              isLoading={sincronizandoFila}
+              className="text-xs"
+              leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
+              title="Sincronizar vendas offline imediatamente com o Firestore"
+            >
+              Sincronizar ({offlineCount})
+            </Button>
+          )}
+
+          {/* Botão de Acesso à Fila Offline / Simulação */}
+          <Button
+            variant={!isOnlineState ? "warning" : "secondary"}
+            size="sm"
+            onClick={() => setModalOfflineAberto(true)}
+            className="text-xs"
+            leftIcon={
+              !isOnlineState ? (
+                <WifiOff className="w-3.5 h-3.5 text-amber-400" />
+              ) : (
+                <Wifi className="w-3.5 h-3.5 text-sky-400" />
+              )
+            }
+          >
+            Fila Offline {offlineCount > 0 ? `(${offlineCount})` : ""}
+          </Button>
+
           <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs font-semibold">
             <button
               type="button"
@@ -711,18 +927,59 @@ export default function Pdv() {
             </button>
           </div>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setModalFecharCaixaAberto(true)}
-            className="text-xs"
-          >
-            Fechar Caixa
-          </Button>
+          {caixaAberto ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setModalFecharCaixaAberto(true)}
+              className="text-xs"
+            >
+              Fechar Caixa
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setModalAbrirCaixaAberto(true)}
+              className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+              leftIcon={<Unlock className="w-3.5 h-3.5" />}
+            >
+              Abrir Caixa
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* Grid Principal do PDV */}
+      {/* Visualização de Caixa Fechado ou Grid Principal do PDV */}
+      {!caixaAberto ? (
+        <Card className="p-12 text-center max-w-xl mx-auto my-8 space-y-6 border-slate-700/80 shadow-2xl bg-slate-900/90">
+          <div className="w-20 h-20 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center mx-auto shadow-inner">
+            <Lock className="w-10 h-10" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-2xl font-black text-white tracking-tight">O Caixa Está Fechado</h2>
+            <p className="text-sm text-slate-300 max-w-md mx-auto">
+              O turno anterior foi finalizado e conferido com o dinheiro já contado pelo sistema. Para registrar novas vendas, escanear produtos e receber pagamentos, abra o caixa informando o troco inicial.
+            </p>
+          </div>
+          <div className="pt-2">
+            <Button
+              variant="primary"
+              size="lg"
+              onClick={() => setModalAbrirCaixaAberto(true)}
+              className="w-full sm:w-auto px-8 py-3.5 text-base font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-950/40"
+              leftIcon={<Unlock className="w-5 h-5" />}
+            >
+              Abrir Caixa Agora
+            </Button>
+          </div>
+          <div className="text-xs text-slate-400 pt-3 border-t border-slate-800 flex items-center justify-center gap-4">
+            <span>Operador: <strong className="text-slate-200">{userProfile?.nome || "Caixa Geral"}</strong></span>
+            <span>•</span>
+            <span>Status: <strong className="text-amber-400 font-semibold">Aguardando Abertura</strong></span>
+          </div>
+        </Card>
+      ) : (
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* COLUNA ESQUERDA: Busca, Scanner e Produtos Rápidos */}
         <div className="lg:col-span-7 space-y-4">
@@ -973,6 +1230,7 @@ export default function Pdv() {
           </Card>
         </div>
       </div>
+      )}
 
       {/* MODAL 1: SELETOR DE TAMANHO NAVEGÁVEL COM SETAS DO TECLADO */}
       <Modal
@@ -1366,16 +1624,35 @@ export default function Pdv() {
         size="sm"
       >
         <ModalBody className="text-center py-6 space-y-4">
-          <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mx-auto animate-bounce">
+          <div
+            className={`w-16 h-16 rounded-full border flex items-center justify-center mx-auto animate-bounce ${
+              ultimaVendaFinalizada?.modoContingencia
+                ? "bg-amber-500/10 border-amber-500/30 text-amber-400"
+                : "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+            }`}
+          >
             <CheckCircle2 className="w-10 h-10" />
           </div>
 
           <div>
-            <h3 className="text-xl font-black text-white tracking-tight">Venda Concluída!</h3>
+            <h3 className="text-xl font-black text-white tracking-tight">
+              {ultimaVendaFinalizada?.modoContingencia
+                ? "Venda Salva em Contingência!"
+                : "Venda Concluída!"}
+            </h3>
             <p className="text-xs text-slate-400 mt-1">
-              Cupom #{ultimaVendaFinalizada?.numeroVenda || "8472"} processado e estoque baixado no Firestore.
+              {ultimaVendaFinalizada?.modoContingencia
+                ? `Protocolo #${ultimaVendaFinalizada?.numeroVenda} emitido offline. O estoque local foi baixado e a venda será enviada à nuvem ao reconectar.`
+                : `Cupom #${ultimaVendaFinalizada?.numeroVenda || "8472"} processado e estoque baixado no Firestore.`}
             </p>
           </div>
+
+          {ultimaVendaFinalizada?.modoContingencia && (
+            <div className="p-2.5 bg-amber-500/10 rounded-xl border border-amber-500/30 text-amber-300 text-xs flex items-center justify-center gap-1.5 font-semibold">
+              <Clock className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Modo Offline: Salvo com segurança no navegador</span>
+            </div>
+          )}
 
           <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs text-slate-300">
             Total Pago: <strong className="text-emerald-400 font-bold">{formatCurrency(ultimaVendaFinalizada?.total || 0)}</strong>
@@ -1388,11 +1665,13 @@ export default function Pdv() {
               className={cn(indiceSucessoFocado === 0 && "ring-2 ring-sky-400 border-sky-400")}
               onClick={() => {
                 if (ultimaVendaFinalizada) {
-                  printThermalReceipt(ultimaVendaFinalizada, {
-                    nome: "LIFESURF CONFECÇÕES",
-                    cidade: "Fortaleza - CE",
-                    mensagemRodape: "OBRIGADO PELA PREFERÊNCIA!"
-                  });
+                  printThermalReceipt(
+                    {
+                      ...ultimaVendaFinalizada,
+                      modoContingencia: !!ultimaVendaFinalizada?.modoContingencia
+                    },
+                    dadosLojaCupom
+                  );
                 }
               }}
               leftIcon={<Printer className="w-4 h-4 text-sky-400" />}
@@ -1423,7 +1702,86 @@ export default function Pdv() {
           setModalFecharCaixaAberto(false);
           searchInputRef.current?.focus();
         }}
+        onClosedSuccess={() => {
+          try {
+            localStorage.setItem(`lifesurf_caixa_aberto_${activeTenantId || "default"}`, "fechado");
+            localStorage.removeItem(`lifesurf_pdv_venda_${activeTenantId || "default"}`);
+          } catch {}
+          setCaixaAberto(false);
+          setCarrinho([]);
+        }}
       />
+
+      {/* MODAL 7: FILA DE CONTINGÊNCIA & MODO OFFLINE */}
+      <ModalFilaOffline
+        isOpen={modalOfflineAberto}
+        onClose={() => {
+          setModalOfflineAberto(false);
+          searchInputRef.current?.focus();
+        }}
+        tenantId={activeTenantId}
+        storeInfo={dadosLojaCupom}
+        onSyncSuccess={() => {
+          carregarProdutos();
+          setOfflineCount(getPendingSalesCount(activeTenantId));
+        }}
+      />
+
+      {/* MODAL 8: ABERTURA DE CAIXA */}
+      <Modal
+        isOpen={modalAbrirCaixaAberto}
+        onClose={() => setModalAbrirCaixaAberto(false)}
+        size="sm"
+      >
+        <form onSubmit={handleAbrirCaixa}>
+          <ModalHeader
+            title="Abertura de Caixa"
+            description="Informe o fundo de troco inicial para liberar o PDV e iniciar as vendas."
+            onClose={() => setModalAbrirCaixaAberto(false)}
+          />
+          <ModalBody className="space-y-4">
+            <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+              <label className="block text-xs font-semibold text-slate-300">
+                Fundo de Troco Inicial (Gaveta R$)
+              </label>
+              <div className="relative">
+                <Input
+                  autoFocus
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  required
+                  value={trocoAberturaInput}
+                  onChange={(e) => setTrocoAberturaInput(e.target.value)}
+                  leftIcon={<DollarSign className="w-4 h-4 text-emerald-400" />}
+                  placeholder="0.00"
+                  className="text-lg font-bold"
+                />
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Este valor servirá como base para o cálculo de gaveta no encerramento do caixa.
+              </p>
+            </div>
+          </ModalBody>
+          <ModalFooter>
+            <Button
+              variant="ghost"
+              type="button"
+              onClick={() => setModalAbrirCaixaAberto(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="primary"
+              type="submit"
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+              leftIcon={<Unlock className="w-4 h-4" />}
+            >
+              Confirmar Abertura (Enter)
+            </Button>
+          </ModalFooter>
+        </form>
+      </Modal>
     </div>
   );
 }

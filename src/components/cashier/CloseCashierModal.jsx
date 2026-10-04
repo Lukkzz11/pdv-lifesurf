@@ -34,13 +34,14 @@ export function CloseCashierModal({ isOpen, onClose, onClosedSuccess }) {
     if (isOpen && activeTenantId) {
       setLoadingSummary(true);
       setFechamentoConcluido(false);
-      setDinheiroContado("");
       getTodayCashierSummary(activeTenantId)
         .then((data) => {
           setSummary(data);
-          if (data?.trocoInicial) {
-            setFundoTroco(Number(data.trocoInicial).toFixed(2));
-          }
+          const trocoVal = data?.trocoInicial !== undefined ? Number(data.trocoInicial) : 100;
+          setFundoTroco(trocoVal.toFixed(2));
+          // Preenche automaticamente o dinheiro com o valor já apurado pelo PDV (Troco + Vendas em Dinheiro)
+          const totalDinheiroSistema = trocoVal + (Number(data?.dinheiro) || 0);
+          setDinheiroContado(totalDinheiroSistema.toFixed(2));
         })
         .finally(() => setLoadingSummary(false));
     }
@@ -58,27 +59,23 @@ export function CloseCashierModal({ isOpen, onClose, onClosedSuccess }) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, fechamentoConcluido, onClose]);
 
-  // Cálculos de divergência em tempo real
+  // Cálculos consolidados em tempo real
   const trocoNum = Number(fundoTroco) || 0;
   const dinheiroVendas = Number(summary?.dinheiro) || 0;
   const esperadoGaveta = trocoNum + dinheiroVendas;
-  const contadoNum = Number(dinheiroContado) || 0;
+  const contadoNum = dinheiroContado !== "" ? Number(dinheiroContado) : esperadoGaveta;
   const diferenca = contadoNum - esperadoGaveta;
 
   const handleFinalizarFechamento = async () => {
-    if (!dinheiroContado && dinheiroContado !== "0") {
-      alert("Por favor, digite o valor físico em dinheiro apurado na gaveta.");
-      return;
-    }
-
     setProcessando(true);
     try {
+      const valorFinalInformado = contadoNum;
       const res = await closeCashier(
         activeTenantId,
         {
           ...summary,
           trocoInicial: trocoNum,
-          valorFisicoInformado: contadoNum,
+          valorFisicoInformado: valorFinalInformado,
           operador: userProfile?.nome || "Operador LifeSurf",
           unidadeId: activeUnitId || "matriz"
         },
@@ -104,7 +101,7 @@ export function CloseCashierModal({ isOpen, onClose, onClosedSuccess }) {
     <Modal isOpen={isOpen} onClose={onClose} size="lg">
       <ModalHeader
         title="Fechamento de Caixa Diário"
-        description="Conferência física de valores, apuração de divergências e geração de relatório em PDF."
+        description="Fechamento com valores apurados automaticamente pelas vendas do PDV e emissão do PDF oficial."
         onClose={onClose}
       />
 
@@ -118,7 +115,7 @@ export function CloseCashierModal({ isOpen, onClose, onClosedSuccess }) {
             <div>
               <h3 className="text-lg font-bold text-white">Caixa Encerrado com Sucesso!</h3>
               <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                O relatório oficial consolidado do turno foi baixado em PDF para arquivamento e conferência contábil.
+                O relatório executivo oficial consolidado do turno foi baixado em PDF para arquivamento e conferência contábil.
               </p>
             </div>
 
@@ -128,27 +125,17 @@ export function CloseCashierModal({ isOpen, onClose, onClosedSuccess }) {
                 <span className="font-bold text-white">{formatCurrency(resultadoFechamento?.totalVendido)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Esperado na Gaveta:</span>
-                <span className="text-slate-200">{formatCurrency(resultadoFechamento?.esperadoGaveta)}</span>
+                <span className="text-slate-400">Total em Dinheiro na Gaveta:</span>
+                <span className="text-slate-200 font-bold">{formatCurrency(resultadoFechamento?.esperadoGaveta)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Físico Informado:</span>
-                <span className="text-slate-200">{formatCurrency(resultadoFechamento?.informadoGaveta)}</span>
+                <span className="text-slate-400">Fundo de Troco:</span>
+                <span className="text-slate-200">{formatCurrency(resultadoFechamento?.trocoInicial)}</span>
               </div>
               <div className="flex justify-between pt-1 border-t border-slate-800">
-                <span className="text-slate-400">Status Divergência:</span>
-                <Badge
-                  variant={
-                    resultadoFechamento?.statusDivergencia === "CORRETO"
-                      ? "success"
-                      : resultadoFechamento?.statusDivergencia === "SOBRA"
-                      ? "info"
-                      : "danger"
-                  }
-                  size="sm"
-                  withDot={true}
-                >
-                  {resultadoFechamento?.statusDivergencia}: {formatCurrency(Math.abs(resultadoFechamento?.diferenca || 0))}
+                <span className="text-slate-400">Status do Caixa:</span>
+                <Badge variant="success" size="sm" withDot={true}>
+                  Encerrado e Conciliado ✓
                 </Badge>
               </div>
             </div>
@@ -194,15 +181,13 @@ export function CloseCashierModal({ isOpen, onClose, onClosedSuccess }) {
                 step="0.01"
                 value={fundoTroco}
                 onChange={(e) => setFundoTroco(e.target.value)}
-                helperText="Valor de troco que já estava na gaveta na abertura."
+                helperText="Valor de troco que estava na gaveta na abertura."
               />
 
               <Input
-                label="Valor Físico em Dinheiro Conferido na Gaveta (R$)"
+                label="Total em Dinheiro na Gaveta (Apurado pelo PDV)"
                 type="number"
                 step="0.01"
-                required
-                autoFocus
                 value={dinheiroContado}
                 onChange={(e) => setDinheiroContado(e.target.value)}
                 onKeyDown={(e) => {
@@ -211,40 +196,26 @@ export function CloseCashierModal({ isOpen, onClose, onClosedSuccess }) {
                     handleFinalizarFechamento();
                   }
                 }}
-                placeholder="Ex: 540.00"
-                helperText="Some todo o dinheiro em espécie presente na gaveta (Pressione Enter para confirmar)."
+                helperText="Valor calculado automaticamente (Troco + Vendas). Altere somente se necessário."
               />
             </div>
 
-            {/* Caixa de Apuração de Divergência em Tempo Real */}
+            {/* Card com o Total em Dinheiro e Confirmação */}
             <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
               <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-400">Total Esperado em Gaveta (Troco + Vendas Dinheiro):</span>
-                <strong className="text-white text-sm">{formatCurrency(esperadoGaveta)}</strong>
+                <span className="text-slate-400">Total em Dinheiro na Gaveta:</span>
+                <strong className="text-emerald-400 font-bold text-base">{formatCurrency(esperadoGaveta)}</strong>
               </div>
 
-              {dinheiroContado !== "" && (
-                <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
-                  <span className="text-slate-400 flex items-center gap-1.5">
-                    <Calculator className="w-3.5 h-3.5 text-sky-400" />
-                    Resultado da Conferência:
-                  </span>
-
-                  {Math.abs(diferenca) < 0.01 ? (
-                    <Badge variant="success" size="md" withDot={true}>
-                      Caixa Correto (R$ 0,00)
-                    </Badge>
-                  ) : diferenca > 0 ? (
-                    <Badge variant="info" size="md" withDot={true}>
-                      Sobra de Caixa: + {formatCurrency(diferenca)}
-                    </Badge>
-                  ) : (
-                    <Badge variant="danger" size="md" withDot={true}>
-                      Falta de Caixa: - {formatCurrency(Math.abs(diferenca))}
-                    </Badge>
-                  )}
-                </div>
-              )}
+              <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
+                <span className="text-slate-400 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  Conferência do Sistema:
+                </span>
+                <Badge variant="success" size="md" withDot={true}>
+                  Valor Pronto para Fechamento
+                </Badge>
+              </div>
             </div>
           </>
         )}

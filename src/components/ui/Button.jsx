@@ -4,7 +4,7 @@ import { Loader2 } from "lucide-react";
 
 const buttonVariants = {
   primary:
-    "bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold shadow-lg shadow-sky-500/20 active:scale-[0.98] border border-sky-400/30",
+    "bg-sky-500 hover:bg-sky-400 text-white font-semibold shadow-lg shadow-sky-500/20 active:scale-[0.98] border border-sky-400/30",
   secondary:
     "bg-slate-800 hover:bg-slate-700 text-slate-100 font-medium border border-slate-700 active:scale-[0.98]",
   outline:

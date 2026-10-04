@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../security/AuthContext";
 import { useTenant } from "../../contexts/TenantContext";
 import { Badge } from "../ui/Badge";
@@ -20,12 +21,21 @@ import {
   Volume2,
   CheckCircle2,
   Sparkles,
-  ExternalLink
+  ExternalLink,
+  Settings,
+  Wifi,
+  WifiOff
 } from "lucide-react";
+import {
+  isPdvOnline,
+  getPendingSalesCount,
+  OFFLINE_EVENT_QUEUE_UPDATED
+} from "../../services/pdvOfflineService";
 
 export function Header({ onToggleMobileMenu, sidebarCollapsed }) {
+  const navigate = useNavigate();
   const { user, userProfile, role, logout } = useAuth();
-  const { activeTenantId, activeUnitId } = useTenant();
+  const { activeTenantId, activeUnitId, companyDetails } = useTenant();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notifMenuOpen, setNotifMenuOpen] = useState(false);
   const [notifications, setNotifications] = useState([
@@ -83,6 +93,27 @@ export function Header({ onToggleMobileMenu, sidebarCollapsed }) {
   // Exemplo de status operacional (será integrado dinamicamente na fase de caixa)
   const isCashierOpen = true;
 
+  // Status de Conectividade & Fila Offline
+  const [isOnline, setIsOnline] = useState(isPdvOnline());
+  const [offlineCount, setOfflineCount] = useState(() => getPendingSalesCount(activeTenantId));
+
+  useEffect(() => {
+    const handleNet = () => {
+      setIsOnline(isPdvOnline());
+      setOfflineCount(getPendingSalesCount(activeTenantId));
+    };
+    window.addEventListener("online", handleNet);
+    window.addEventListener("offline", handleNet);
+    window.addEventListener("pdv:network_status_changed", handleNet);
+    window.addEventListener(OFFLINE_EVENT_QUEUE_UPDATED, handleNet);
+    return () => {
+      window.removeEventListener("online", handleNet);
+      window.removeEventListener("offline", handleNet);
+      window.removeEventListener("pdv:network_status_changed", handleNet);
+      window.removeEventListener(OFFLINE_EVENT_QUEUE_UPDATED, handleNet);
+    };
+  }, [activeTenantId]);
+
   return (
     <header className="sticky top-0 z-30 h-16 w-full glass-panel border-b border-slate-800/80 px-4 sm:px-6 flex items-center justify-between">
       {/* Left: Mobile Toggle & Context Info */}
@@ -96,16 +127,22 @@ export function Header({ onToggleMobileMenu, sidebarCollapsed }) {
           <Menu className="w-5 h-5" />
         </button>
 
-        {/* Informações da Empresa e Loja Ativa */}
+        {/* Informações da Empresa e Loja Ativa com Troca Rápida */}
         <div className="flex items-center gap-2">
-          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-850/80 border border-slate-800 text-xs text-slate-300">
-            <Building className="w-3.5 h-3.5 text-sky-400" />
-            <span className="font-semibold text-white uppercase tracking-wider">
-              {activeTenantId || "LifeSurf"}
+          <button
+            type="button"
+            onClick={() => navigate("/selecionar-empresa")}
+            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-850/80 border border-slate-800 hover:border-sky-500/50 hover:bg-slate-800/80 text-xs text-slate-300 transition-colors cursor-pointer group"
+            title="Clique para alternar ou cadastrar empresa"
+          >
+            <Building className="w-3.5 h-3.5 text-sky-400 group-hover:scale-110 transition-transform" />
+            <span className="font-semibold text-white uppercase tracking-wider max-w-[150px] truncate">
+              {companyDetails?.nome || activeTenantId || "LifeSurf"}
             </span>
             <span className="text-slate-500">|</span>
             <span className="text-slate-400 capitalize">{activeUnitId || "Matriz"}</span>
-          </div>
+            <ChevronDown className="w-3 h-3 text-slate-500 group-hover:text-sky-400 ml-0.5" />
+          </button>
 
           {/* Badge de Status do Caixa */}
           <Badge
@@ -117,6 +154,31 @@ export function Header({ onToggleMobileMenu, sidebarCollapsed }) {
           >
             {isCashierOpen ? "Caixa Aberto" : "Caixa Fechado"}
           </Badge>
+
+          {/* Badge de Status de Conectividade / Fila Offline */}
+          {!isOnline ? (
+            <button
+              type="button"
+              onClick={() => navigate("/pdv")}
+              className="cursor-pointer transition-transform hover:scale-105 outline-none"
+              title="PDV em Modo Contingência (Offline). Clique para abrir o PDV."
+            >
+              <Badge variant="warning" size="sm" withDot pulseDot>
+                Modo Offline
+              </Badge>
+            </button>
+          ) : offlineCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => navigate("/pdv")}
+              className="cursor-pointer transition-transform hover:scale-105 outline-none"
+              title={`${offlineCount} vendas pendentes de sincronização. Clique para abrir o PDV.`}
+            >
+              <Badge variant="warning" size="sm" withDot>
+                {offlineCount} offline
+              </Badge>
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -230,6 +292,17 @@ export function Header({ onToggleMobileMenu, sidebarCollapsed }) {
           )}
         </div>
 
+        {/* Atalho Rápido para Configurações */}
+        <button
+          type="button"
+          onClick={() => navigate("/configuracoes")}
+          className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors border border-transparent hover:border-slate-700/60 cursor-pointer"
+          title="Configurações & Ajustes da Empresa"
+          aria-label="Configurações & Ajustes da Empresa"
+        >
+          <Settings className="w-4 h-4 text-slate-300 hover:text-sky-400 transition-colors" />
+        </button>
+
         {/* Menu do Usuário */}
         <div className="relative">
           <button
@@ -273,7 +346,31 @@ export function Header({ onToggleMobileMenu, sidebarCollapsed }) {
                   </div>
                 </div>
 
-                <div className="p-1">
+                <div className="p-1 space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      navigate("/selecionar-empresa");
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-sky-400 hover:text-white hover:bg-sky-500/20 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <Building className="w-3.5 h-3.5" />
+                    <span>Trocar / Criar Empresa</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      navigate("/configuracoes");
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <Settings className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Configurações da Loja</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => {

@@ -1,6 +1,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { formatCurrency, formatDate } from "../utils/formatters";
+import { uploadPdfToGoogleDrive, isGoogleConnected } from "./googleApiService";
 
 /**
  * SERVIÇO DE GERAÇÃO DE LISTA DE SEPARAÇÃO (PICKING LIST) EM PDF E BOBINA TÉRMICA 80MM
@@ -9,10 +10,12 @@ import { formatCurrency, formatDate } from "../utils/formatters";
 
 /**
  * Gera e baixa o PDF oficial da Ordem de Separação (A4)
+ * e opcionalmente salva no Google Drive da empresa (Free Tier)
  * @param {object} order - Dados do pedido
  * @param {object} storeInfo - Informações da empresa
+ * @param {object} options - Opções ({ download, uploadDrive })
  */
-export function generateOrderPickingListPDF(order, storeInfo = {}) {
+export function generateOrderPickingListPDF(order, storeInfo = {}, options = {}) {
   const doc = new jsPDF({
     orientation: "portrait",
     unit: "mm",
@@ -149,10 +152,49 @@ export function generateOrderPickingListPDF(order, storeInfo = {}) {
     doc.text(`Data e Hora da Conferência: ____/____/________  às  ____:____`, 18, signY + 15);
   }
 
-  // Salva o PDF
+  // Salva o PDF localmente
   const nomeArquivo = `Separacao_${order.numeroPedido || "pedido"}.pdf`;
-  doc.save(nomeArquivo);
+  if (options.download !== false) {
+    doc.save(nomeArquivo);
+  }
+
+  // Gera o Blob para upload no Google Drive
+  const pdfBlob = doc.output("blob");
+  let drivePromise = null;
+
+  if (options.uploadDrive !== false && isGoogleConnected()) {
+    drivePromise = uploadPdfToGoogleDrive({
+      pdfBlob,
+      fileName: nomeArquivo,
+      folderName: "LifeSurf ERP - Listas de Separação",
+      description: `Lista de separação e expedição do pedido ${order.numeroPedido || order.id} para o cliente ${order.cliente?.nome || "Consumidor"}`
+    })
+      .then((res) => {
+        console.log("[pickingListService] Lista de separação salva no Google Drive:", res.webViewLink);
+        return res;
+      })
+      .catch((err) => {
+        console.warn("[pickingListService] Não foi possível salvar lista no Google Drive:", err.message);
+        throw err;
+      });
+  }
+
+  return { doc, blob: pdfBlob, fileName: nomeArquivo, drivePromise };
 }
+
+/**
+ * Envia manualmente uma lista de separação de pedido para o Google Drive
+ */
+export async function uploadPickingListToGoogleDriveManual(order, storeInfo = {}) {
+  const { blob, fileName } = generateOrderPickingListPDF(order, storeInfo, { download: false, uploadDrive: false });
+  return await uploadPdfToGoogleDrive({
+    pdfBlob: blob,
+    fileName,
+    folderName: "LifeSurf ERP - Listas de Separação",
+    description: `Lista de separação do pedido ${order.numeroPedido || order.id}`
+  });
+}
+
 
 /**
  * Dispara impressão direta para bobina térmica (80mm) de Ordem de Separação
