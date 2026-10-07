@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../security/AuthContext";
 import { useTenant } from "../contexts/TenantContext";
-import { useTheme, THEME_PRESETS } from "../contexts/ThemeContext";
+import { useTheme, THEME_PRESETS, AVAILABLE_FONTS } from "../contexts/ThemeContext";
 import { USER_ROLES } from "../config/constants";
 import { printThermalReceipt } from "../services/receiptService";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "../components/ui/Card";
@@ -44,9 +44,25 @@ import {
   Star,
   ShoppingBag,
   Copy,
-  Edit2
+  Edit2,
+  Layers,
+  LayoutDashboard,
+  ArrowUp,
+  ArrowDown,
+  Grid,
+  LayoutGrid,
+  Columns,
+  CheckSquare,
+  Square,
+  ShieldAlert
 } from "lucide-react";
 import toast from "react-hot-toast";
+import {
+  DEFAULT_PAINEL_CONFIG,
+  LISTA_MODULOS_DISPONIVEIS,
+  getCompanyPainelConfig,
+  updateCompanyPainelConfig
+} from "../services/tenantService";
 import {
   fetchAdminCatalogProducts,
   toggleProductCatalogVisibility,
@@ -107,17 +123,105 @@ export default function Configuracoes() {
     exigirJustificativaPerda: true
   });
 
-  // Estados do Personalizador de Cores
+  // Estados do Personalizador de Cores, Superfícies & Tipografia
   const [customPrimary, setCustomPrimary] = useState(themeConfig.primaryColor || "#0284c7");
   const [customAccent, setCustomAccent] = useState(themeConfig.accentColor || "#38bdf8");
+  const [customBgMain, setCustomBgMain] = useState(themeConfig.bgMain || "#090d16");
+  const [customBgCard, setCustomBgCard] = useState(themeConfig.bgCard || "#0f172a");
+  const [customBorderSubtle, setCustomBorderSubtle] = useState(themeConfig.borderSubtle || "rgba(255, 255, 255, 0.08)");
+  const [customFontFamily, setCustomFontFamily] = useState(themeConfig.fontFamily || "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif");
+  const [customHeadingColor, setCustomHeadingColor] = useState(themeConfig.headingColor || "#ffffff");
+  const [customBodyTextColor, setCustomBodyTextColor] = useState(themeConfig.bodyTextColor || "#f8fafc");
   const [customMode, setCustomMode] = useState(themeConfig.mode || "dark");
 
   // Sincroniza estados do seletor quando o tema ativo muda
   useEffect(() => {
     if (themeConfig?.primaryColor) setCustomPrimary(themeConfig.primaryColor);
     if (themeConfig?.accentColor) setCustomAccent(themeConfig.accentColor);
+    if (themeConfig?.bgMain) setCustomBgMain(themeConfig.bgMain);
+    if (themeConfig?.bgCard) setCustomBgCard(themeConfig.bgCard);
+    if (themeConfig?.borderSubtle) setCustomBorderSubtle(themeConfig.borderSubtle);
+    if (themeConfig?.fontFamily) setCustomFontFamily(themeConfig.fontFamily);
+    if (themeConfig?.headingColor) setCustomHeadingColor(themeConfig.headingColor);
+    if (themeConfig?.bodyTextColor) setCustomBodyTextColor(themeConfig.bodyTextColor);
     if (themeConfig?.mode) setCustomMode(themeConfig.mode);
   }, [themeConfig]);
+
+  // Estados do Editor do Painel Geral (Workspace)
+  const [painelConfigState, setPainelConfigState] = useState(() => {
+    return companyDetails?.painelConfig || getCompanyPainelConfig(activeTenantId);
+  });
+  const [salvandoPainel, setSalvandoPainel] = useState(false);
+
+  useEffect(() => {
+    const config = companyDetails?.painelConfig || getCompanyPainelConfig(activeTenantId);
+    if (config) {
+      setPainelConfigState(config);
+    }
+  }, [activeTenantId]);
+
+  const handleToggleModulo = (moduloId) => {
+    setPainelConfigState((prev) => {
+      const desativados = prev.modulosDesativados || [];
+      const estaDesativado = desativados.includes(moduloId);
+      const novosDesativados = estaDesativado
+        ? desativados.filter((id) => id !== moduloId)
+        : [...desativados, moduloId];
+      const novo = { ...prev, modulosDesativados: novosDesativados };
+      updateCompanyPainelConfig(activeTenantId, novo);
+      return novo;
+    });
+  };
+
+  const handleMoverModulo = (moduloId, direcao) => {
+    setPainelConfigState((prev) => {
+      const ordem = [...(prev.ordemModulos || DEFAULT_PAINEL_CONFIG.ordemModulos)];
+      const index = ordem.indexOf(moduloId);
+      if (index === -1) return prev;
+      const novoIndex = (direcao === "cima" || direcao === "up") ? index - 1 : index + 1;
+      if (novoIndex < 0 || novoIndex >= ordem.length) return prev;
+      const item = ordem.splice(index, 1)[0];
+      ordem.splice(novoIndex, 0, item);
+      const novo = { ...prev, ordemModulos: ordem };
+      updateCompanyPainelConfig(activeTenantId, novo);
+      return novo;
+    });
+  };
+
+  const handleAtualizarParametroPainel = (campo, valor) => {
+    setPainelConfigState((prev) => {
+      const novo = { ...prev, [campo]: valor };
+      updateCompanyPainelConfig(activeTenantId, novo);
+      return novo;
+    });
+  };
+
+  const handleSalvarPainelConfig = async () => {
+    setSalvandoPainel(true);
+    try {
+      const salvo = await updateCompanyPainelConfig(activeTenantId, painelConfigState);
+      if (updateCompany) {
+        await updateCompany({ painelConfig: salvo });
+      }
+      toast.success("Formação e atalhos do Painel Geral salvos e aplicados com sucesso!");
+    } catch (err) {
+      console.error("[Configuracoes] Erro ao salvar configuração do painel:", err);
+      toast.error("Falha ao salvar configurações do Painel Geral.");
+    } finally {
+      setSalvandoPainel(false);
+    }
+  };
+
+  const handleRestaurarPadraoPainel = async () => {
+    if (window.confirm("Deseja restaurar a formação padrão original de 3 colunas e todos os 14 atalhos visíveis?")) {
+      setPainelConfigState(DEFAULT_PAINEL_CONFIG);
+      await updateCompanyPainelConfig(activeTenantId, DEFAULT_PAINEL_CONFIG);
+      if (updateCompany) {
+        await updateCompany({ painelConfig: DEFAULT_PAINEL_CONFIG });
+      }
+      toast.success("Formação padrão restaurada e aplicada no Painel Geral!");
+    }
+  };
 
   // Estados da Integração com Google Workspace (Free Tier)
   const [googleClientId, setGoogleClientId] = useState(() => getGoogleClientId());
@@ -314,17 +418,34 @@ export default function Configuracoes() {
       if (preset) {
         setCustomPrimary(preset.primaryColor);
         setCustomAccent(preset.accentColor);
+        setCustomBgMain(preset.bgMain || "#090d16");
+        setCustomBgCard(preset.bgCard || "#0f172a");
+        setCustomBorderSubtle(preset.borderSubtle || "rgba(255, 255, 255, 0.08)");
         setCustomMode(preset.mode);
+        await changeTheme(
+          {
+            id: preset.id,
+            primaryColor: preset.primaryColor,
+            accentColor: preset.accentColor,
+            mode: preset.mode,
+            bgMain: preset.bgMain,
+            bgCard: preset.bgCard,
+            bgCardHover: preset.bgCardHover,
+            borderSubtle: preset.borderSubtle
+          },
+          true
+        );
+      } else {
+        await changeTheme(presetId, true);
       }
-      await changeTheme(presetId, true);
-      toast.success(`Tema "${preset?.nome}" aplicado e salvo na empresa!`);
+      toast.success(`Tema "${preset?.nome || presetId}" aplicado e salvo na empresa!`);
     } catch (err) {
       console.error("[Configuracoes] Erro ao aplicar tema:", err);
       toast.error("Erro ao aplicar tema");
     }
   };
 
-  // Aplicação de Cores Customizadas
+  // Aplicação de Identidade Visual Avançada (Cores, Blocos, Fundos e Tipografia)
   const handleAplicarCoresCustomizadas = async () => {
     try {
       await changeTheme(
@@ -332,14 +453,21 @@ export default function Configuracoes() {
           id: "custom",
           primaryColor: customPrimary,
           accentColor: customAccent,
+          bgMain: customBgMain,
+          bgCard: customBgCard,
+          bgCardHover: customBgCard,
+          borderSubtle: customBorderSubtle,
+          fontFamily: customFontFamily,
+          headingColor: customHeadingColor,
+          bodyTextColor: customBodyTextColor,
           mode: customMode
         },
         true
       );
-      toast.success("Paleta da marca salva no Firestore e aplicada com sucesso!");
+      toast.success("Identidade visual, cores e tipografia salvas no Firestore da empresa!");
     } catch (err) {
       console.error("[Configuracoes] Erro ao aplicar cores:", err);
-      toast.error("Erro ao aplicar cores customizadas");
+      toast.error("Erro ao aplicar personalização visual");
     }
   };
 
@@ -564,6 +692,7 @@ export default function Configuracoes() {
           { id: "empresa", label: "Dados da Loja & Cupom", icon: Building2 },
           { id: "operacoes", label: "Operações PDV & Backup", icon: RefreshCw },
           { id: "catalogo", label: "Catálogo & Vitrine Online", icon: Globe },
+          { id: "painel", label: "Editor do Painel Geral", icon: LayoutDashboard },
           { id: "tema", label: "Identidade Visual & Tema", icon: Palette },
           { id: "parametros", label: "Parâmetros Fiscais & ERP", icon: Sliders },
           { id: "google", label: "Google Workspace & Nuvem", icon: Cloud },
@@ -578,12 +707,12 @@ export default function Configuracoes() {
               onClick={() => setAbaAtiva(tab.id)}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-t-xl font-bold text-xs transition-all cursor-pointer border-b-2 ${
                 isAtiva
-                  ? "border-sky-500 text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-500/10"
-                  : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-900/40"
+                  ? "border-sky-400 bg-sky-500 !text-white shadow-md font-extrabold"
+                  : "border-transparent text-slate-400 hover:text-white hover:bg-slate-800/60"
               }`}
             >
-              <Icon className="w-4 h-4" />
-              <span>{tab.label}</span>
+              <Icon className={`w-4 h-4 shrink-0 ${isAtiva ? "!text-white" : ""}`} />
+              <span className={isAtiva ? "!text-white font-extrabold" : ""}>{tab.label}</span>
             </button>
           );
         })}
@@ -809,6 +938,273 @@ export default function Configuracoes() {
         </div>
       )}
 
+      {/* ABA: EDITOR DO PAINEL GERAL (FORMAÇÃO E ATALHOS) */}
+      {abaAtiva === "painel" && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-200 dark:border-slate-800">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                <LayoutDashboard className="w-4 h-4 text-sky-500" />
+                Editor de Layout & Atalhos do Painel Geral
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Customize a formação da grade inicial, oculte atalhos que você não utiliza e reordene as prioridades de acesso da equipe.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRestaurarPadraoPainel}
+                leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
+              >
+                Restaurar Padrão
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={handleSalvarPainelConfig}
+                isLoading={salvandoPainel}
+                leftIcon={<Save className="w-3.5 h-3.5" />}
+              >
+                Salvar Painel
+              </Button>
+            </div>
+          </div>
+
+          {/* Configurações de Formação / Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Colunas do Grid */}
+            <Card className="p-4 space-y-3">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
+                <Columns className="w-4 h-4 text-sky-500" />
+                <span>Formação de Colunas</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: "2", label: "2 Colunas" },
+                  { id: "3", label: "3 Colunas" },
+                  { id: "4", label: "4 Colunas" }
+                ].map((col) => (
+                  <button
+                    key={col.id}
+                    type="button"
+                    onClick={() => handleAtualizarParametroPainel("colunasGrid", col.id)}
+                    className={`py-2 px-1 text-xs font-bold rounded-lg border transition-all cursor-pointer text-center ${
+                      painelConfigState.colunasGrid === col.id
+                        ? "bg-sky-500 text-slate-950 border-sky-400 shadow-sm"
+                        : "bg-slate-100 dark:bg-slate-900/60 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+                    }`}
+                  >
+                    {col.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                Define a distribuição dos blocos na tela inicial.
+              </p>
+            </Card>
+
+            {/* Densidade dos Cards */}
+            <Card className="p-4 space-y-3">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
+                <LayoutGrid className="w-4 h-4 text-emerald-500" />
+                <span>Densidade Visual</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: "compacto", label: "Compacto" },
+                  { id: "padrao", label: "Padrão" },
+                  { id: "detalhado", label: "Expandido" }
+                ].map((den) => (
+                  <button
+                    key={den.id}
+                    type="button"
+                    onClick={() => handleAtualizarParametroPainel("densidadeCards", den.id)}
+                    className={`py-2 px-1 text-xs font-bold rounded-lg border transition-all cursor-pointer text-center ${
+                      painelConfigState.densidadeCards === den.id
+                        ? "bg-emerald-500 text-slate-950 border-emerald-400 shadow-sm"
+                        : "bg-slate-100 dark:bg-slate-900/60 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+                    }`}
+                  >
+                    {den.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                Ajusta o espaçamento interno e tamanho dos textos.
+              </p>
+            </Card>
+
+            {/* Alertas Críticos (Torre de Controle) */}
+            <Card className="p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
+                  <ShieldAlert className="w-4 h-4 text-amber-500" />
+                  <span>Torre de Controle</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={painelConfigState.exibirAlertasCriticos}
+                  onChange={(e) => handleAtualizarParametroPainel("exibirAlertasCriticos", e.target.checked)}
+                  className="w-4 h-4 accent-amber-500 cursor-pointer"
+                />
+              </div>
+              <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                Exibir alertas de estoque mínimo, faturas a vencer e auditoria operacional no topo da tela.
+              </p>
+              <Badge variant={painelConfigState.exibirAlertasCriticos ? "amber" : "neutral"} size="sm">
+                {painelConfigState.exibirAlertasCriticos ? "Alertas Visíveis" : "Alertas Ocultos"}
+              </Badge>
+            </Card>
+
+            {/* Ações Rápidas do Cabeçalho */}
+            <Card className="p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
+                  <Sliders className="w-4 h-4 text-indigo-500" />
+                  <span>Barra de Ações Rápidas</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={painelConfigState.exibirAcoesCabecalho}
+                  onChange={(e) => handleAtualizarParametroPainel("exibirAcoesCabecalho", e.target.checked)}
+                  className="w-4 h-4 accent-indigo-500 cursor-pointer"
+                />
+              </div>
+              <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                Botões de Nova Venda PDV, Sangria e Novo Pedido no topo direito do cabeçalho.
+              </p>
+              <Badge variant={painelConfigState.exibirAcoesCabecalho ? "indigo" : "neutral"} size="sm">
+                {painelConfigState.exibirAcoesCabecalho ? "Ações Ativas" : "Ocultas"}
+              </Badge>
+            </Card>
+          </div>
+
+          {/* Gerenciador e Reordenação de Atalhos */}
+          <Card className="p-6 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800 gap-2">
+              <div>
+                <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                  <Grid className="w-4 h-4 text-sky-500" />
+                  Gestão dos Atalhos do Painel (Exibir / Ocultar / Reordenar)
+                </h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Clique no checkbox para ligar ou desligar um atalho do painel principal. Use as setas para alterar a posição.
+                </p>
+              </div>
+              <div className="text-xs text-slate-500 font-mono">
+                {LISTA_MODULOS_DISPONIVEIS.length - painelConfigState.modulosDesativados.length} de {LISTA_MODULOS_DISPONIVEIS.length} atalhos ativos
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {painelConfigState.ordemModulos.map((moduloId, idx) => {
+                const info = LISTA_MODULOS_DISPONIVEIS.find(m => m.id === moduloId) || {
+                  id: moduloId,
+                  titulo: moduloId,
+                  categoria: "Geral",
+                  descricao: ""
+                };
+                const isDesativado = painelConfigState.modulosDesativados.includes(moduloId);
+
+                return (
+                  <div
+                    key={moduloId}
+                    className={`flex items-center justify-between p-3.5 rounded-xl border transition-all ${
+                      isDesativado
+                        ? "bg-slate-100/50 dark:bg-slate-900/30 border-slate-200 dark:border-slate-800/60 opacity-60"
+                        : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-sm hover:border-slate-300 dark:hover:border-slate-700"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleModulo(moduloId)}
+                        className={`w-6 h-6 rounded-lg flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
+                          !isDesativado
+                            ? "bg-sky-500 text-slate-950"
+                            : "bg-slate-200 dark:bg-slate-800 text-slate-400 hover:bg-slate-300 dark:hover:bg-slate-700"
+                        }`}
+                        title={isDesativado ? "Clique para ativar" : "Clique para desativar"}
+                      >
+                        {!isDesativado ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+                      </button>
+
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-bold truncate ${isDesativado ? "text-slate-400 line-through" : "text-slate-900 dark:text-white"}`}>
+                            {info.titulo}
+                          </span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-medium shrink-0">
+                            {info.categoria}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                          {info.descricao}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0 ml-2">
+                      <button
+                        type="button"
+                        onClick={() => handleMoverModulo(moduloId, "up")}
+                        disabled={idx === 0}
+                        className={`p-1.5 rounded-lg border transition-colors ${
+                          idx === 0
+                            ? "opacity-30 cursor-not-allowed border-transparent text-slate-400"
+                            : "hover:bg-slate-100 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 cursor-pointer"
+                        }`}
+                        title="Mover para cima"
+                      >
+                        <ArrowUp className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleMoverModulo(moduloId, "down")}
+                        disabled={idx === painelConfigState.ordemModulos.length - 1}
+                        className={`p-1.5 rounded-lg border transition-colors ${
+                          idx === painelConfigState.ordemModulos.length - 1
+                            ? "opacity-30 cursor-not-allowed border-transparent text-slate-400"
+                            : "hover:bg-slate-100 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 cursor-pointer"
+                        }`}
+                        title="Mover para baixo"
+                      >
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                Dica: Ocultar módulos que sua equipe não usa deixa o painel mais leve e veloz.
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={handleRestaurarPadraoPainel}
+                >
+                  Restaurar Padrão
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleSalvarPainelConfig}
+                  isLoading={salvandoPainel}
+                  leftIcon={<Save className="w-4 h-4" />}
+                >
+                  Salvar Formação do Painel
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
       {/* ABA 2: PERSONALIZAÇÃO DE CORES & TEMA ERP */}
       {abaAtiva === "tema" && (
         <div className="space-y-6">
@@ -998,21 +1394,202 @@ export default function Configuracoes() {
               </div>
             </div>
 
+            {/* CUSTOMIZAÇÃO TOTAL DE BLOCOS, FUNDOS E SUPERFÍCIES */}
+            <div className="space-y-3 pt-2 border-t border-slate-800">
+              <div className="flex items-center gap-2 text-xs font-bold text-sky-400 uppercase tracking-wider">
+                <Layers className="w-4 h-4" />
+                <span>Customização de Blocos, Fundos & Superfícies (Tons de Cinza / Cards)</span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Personalize as cores de fundo de toda a aplicação, alterando os tons de cinza padrão para a identidade exata da sua empresa.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {/* Cor de Fundo Principal */}
+                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                  <label className="text-xs font-semibold text-white block">
+                    Fundo Principal da Tela
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="color"
+                      value={customBgMain}
+                      onChange={(e) => setCustomBgMain(e.target.value)}
+                      className="w-10 h-10 rounded-lg cursor-pointer bg-transparent border-0"
+                    />
+                    <input
+                      type="text"
+                      value={customBgMain}
+                      onChange={(e) => setCustomBgMain(e.target.value)}
+                      className="w-28 font-mono text-xs font-bold uppercase p-2 rounded-md bg-slate-900 border border-slate-700 text-white"
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-500 block">
+                    Fundo geral de todas as páginas e navegação.
+                  </span>
+                </div>
+
+                {/* Cor dos Cards e Blocos */}
+                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                  <label className="text-xs font-semibold text-white block">
+                    Fundo dos Blocos e Cards
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="color"
+                      value={customBgCard.startsWith("#") ? customBgCard : "#0f172a"}
+                      onChange={(e) => setCustomBgCard(e.target.value)}
+                      className="w-10 h-10 rounded-lg cursor-pointer bg-transparent border-0"
+                    />
+                    <input
+                      type="text"
+                      value={customBgCard}
+                      onChange={(e) => setCustomBgCard(e.target.value)}
+                      className="w-28 font-mono text-xs font-bold uppercase p-2 rounded-md bg-slate-900 border border-slate-700 text-white"
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-500 block">
+                    Superfície dos painéis, tabelas e caixas do ERP.
+                  </span>
+                </div>
+
+                {/* Cor das Bordas e Divisórias */}
+                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                  <label className="text-xs font-semibold text-white block">
+                    Cor das Bordas Sutis
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="color"
+                      value={customBorderSubtle.startsWith("#") ? customBorderSubtle : "#334155"}
+                      onChange={(e) => setCustomBorderSubtle(e.target.value)}
+                      className="w-10 h-10 rounded-lg cursor-pointer bg-transparent border-0"
+                    />
+                    <input
+                      type="text"
+                      value={customBorderSubtle}
+                      onChange={(e) => setCustomBorderSubtle(e.target.value)}
+                      className="w-28 font-mono text-xs font-bold uppercase p-2 rounded-md bg-slate-900 border border-slate-700 text-white"
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-500 block">
+                    Linhas divisórias de tabelas e contornos de cards.
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* PERSONALIZAÇÃO DE TIPOGRAFIA & CORES DE FONTE */}
+            <div className="space-y-3 pt-2 border-t border-slate-800">
+              <div className="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wider">
+                <Sparkles className="w-4 h-4" />
+                <span>Personalização de Tipografia (Família da Fonte & Cores do Texto)</span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Altere a família tipográfica da interface inteira e defina as tonalidades de títulos e textos específicos.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {/* Família da Fonte */}
+                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                  <label className="text-xs font-semibold text-white block">
+                    Família Tipográfica
+                  </label>
+                  <Select
+                    value={customFontFamily}
+                    onChange={(e) => setCustomFontFamily(e.target.value)}
+                  >
+                    {AVAILABLE_FONTS.map((f) => (
+                      <option key={f.id} value={f.family}>
+                        {f.nome}
+                      </option>
+                    ))}
+                  </Select>
+                  <span className="text-[10px] text-slate-500 block">
+                    Carregamento inteligente de Google Fonts integrado.
+                  </span>
+                </div>
+
+                {/* Cor dos Títulos e Cabeçalhos */}
+                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                  <label className="text-xs font-semibold text-white block">
+                    Cor dos Títulos (H1, H2, Cabeçalhos)
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="color"
+                      value={customHeadingColor}
+                      onChange={(e) => setCustomHeadingColor(e.target.value)}
+                      className="w-10 h-10 rounded-lg cursor-pointer bg-transparent border-0"
+                    />
+                    <input
+                      type="text"
+                      value={customHeadingColor}
+                      onChange={(e) => setCustomHeadingColor(e.target.value)}
+                      className="w-28 font-mono text-xs font-bold uppercase p-2 rounded-md bg-slate-900 border border-slate-700 text-white"
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-500 block">
+                    Aplicada em nomes de páginas, seções e destaques.
+                  </span>
+                </div>
+
+                {/* Cor do Texto do Corpo */}
+                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                  <label className="text-xs font-semibold text-white block">
+                    Cor do Texto Geral (Corpo)
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="color"
+                      value={customBodyTextColor}
+                      onChange={(e) => setCustomBodyTextColor(e.target.value)}
+                      className="w-10 h-10 rounded-lg cursor-pointer bg-transparent border-0"
+                    />
+                    <input
+                      type="text"
+                      value={customBodyTextColor}
+                      onChange={(e) => setCustomBodyTextColor(e.target.value)}
+                      className="w-28 font-mono text-xs font-bold uppercase p-2 rounded-md bg-slate-900 border border-slate-700 text-white"
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-500 block">
+                    Aplicada em parágrafos, tabelas e legendas operacionais.
+                  </span>
+                </div>
+              </div>
+            </div>
+
             {/* Painel de Pré-visualização ao Vivo do ERP */}
-            <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800/90 space-y-3">
+            <div
+              style={{
+                backgroundColor: customBgMain,
+                fontFamily: customFontFamily,
+                borderColor: customBorderSubtle
+              }}
+              className="p-5 rounded-xl border space-y-3 transition-all"
+            >
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                  Pré-visualização ao Vivo dos Componentes ERP:
+                <span
+                  style={{ color: customHeadingColor }}
+                  className="text-xs font-extrabold uppercase tracking-wider"
+                >
+                  Pré-visualização ao Vivo com Todas as Configurações:
                 </span>
-                <span className="text-[10px] text-slate-500">
-                  Simulação com as cores selecionadas
+                <span style={{ color: customBodyTextColor }} className="text-[10px]">
+                  Fonte ativa: {customFontFamily.split(",")[0].replace(/['"]/g, "")}
                 </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
                 {/* 1. Botão Primário */}
-                <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 flex flex-col justify-center items-center gap-2">
-                  <span className="text-[10px] text-slate-400 font-medium">Botão Primário</span>
+                <div
+                  style={{ backgroundColor: customBgCard, borderColor: customBorderSubtle }}
+                  className="p-3 rounded-lg border flex flex-col justify-center items-center gap-2"
+                >
+                  <span style={{ color: customBodyTextColor }} className="text-[10px] font-medium">
+                    Botão Primário
+                  </span>
                   <button
                     type="button"
                     style={{ backgroundColor: customPrimary }}
@@ -1023,8 +1600,13 @@ export default function Configuracoes() {
                 </div>
 
                 {/* 2. Menu Ativo / Navegação */}
-                <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 flex flex-col justify-center items-center gap-2">
-                  <span className="text-[10px] text-slate-400 font-medium">Menu Ativo da Barra</span>
+                <div
+                  style={{ backgroundColor: customBgCard, borderColor: customBorderSubtle }}
+                  className="p-3 rounded-lg border flex flex-col justify-center items-center gap-2"
+                >
+                  <span style={{ color: customBodyTextColor }} className="text-[10px] font-medium">
+                    Menu Ativo da Barra
+                  </span>
                   <div
                     style={{
                       backgroundColor: `${customPrimary}25`,
@@ -1045,8 +1627,13 @@ export default function Configuracoes() {
                 </div>
 
                 {/* 3. Card de KPI do Dashboard */}
-                <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 flex flex-col justify-center items-center gap-1.5">
-                  <span className="text-[10px] text-slate-400 font-medium">Métrica do Dashboard</span>
+                <div
+                  style={{ backgroundColor: customBgCard, borderColor: customBorderSubtle }}
+                  className="p-3 rounded-lg border flex flex-col justify-center items-center gap-1.5"
+                >
+                  <span style={{ color: customHeadingColor }} className="text-[10px] font-bold">
+                    Métrica do Dashboard
+                  </span>
                   <div className="flex items-center gap-2">
                     <span
                       style={{ color: customAccent }}

@@ -75,10 +75,67 @@ export const DEMO_FINANCIAL_METRICS = {
   }
 };
 
+export const ZERO_FINANCIAL_METRICS = {
+  faturamentoBruto: 0,
+  descontos: 0,
+  faturamentoLiquido: 0,
+  custoMercadorias: 0,
+  lucroBruto: 0,
+  margemLucroPercentual: 0,
+  totalVendas: 0,
+  ticketMedio: 0,
+  totalPecasVendidas: 0,
+  formasPagamento: {
+    pix: { total: 0, qtd: 0, percentual: 0 },
+    dinheiro: { total: 0, qtd: 0, percentual: 0 },
+    cartao_credito: { total: 0, qtd: 0, percentual: 0 },
+    cartao_debito: { total: 0, qtd: 0, percentual: 0 },
+    a_ver: { total: 0, qtd: 0, percentual: 0 }
+  }
+};
+
+/**
+ * Verifica se os relatórios foram zerados pelo usuário
+ */
+export function isReportsZerado(tenantId) {
+  try {
+    return localStorage.getItem(`lifesurf_dre_zerado_${tenantId || "default"}`) === "true";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Marca os relatórios como zerados (limpando faturamento, lucro, formas de pagamento)
+ */
+export function zerarFinancialReports(tenantId) {
+  try {
+    localStorage.setItem(`lifesurf_dre_zerado_${tenantId || "default"}`, "true");
+  } catch (err) {
+    console.warn("[reportsService] Erro ao salvar flag de relatórios zerados:", err);
+  }
+}
+
+/**
+ * Restaura métricas demonstrativas
+ */
+export function restaurarDemoFinancialReports(tenantId) {
+  try {
+    localStorage.removeItem(`lifesurf_dre_zerado_${tenantId || "default"}`);
+  } catch (err) {
+    console.warn("[reportsService] Erro ao restaurar demonstrativo:", err);
+  }
+}
+
 /**
  * Busca dados consolidados de DRE e faturamento
  */
 export async function fetchFinancialReports(tenantId, periodo = "mes") {
+  // Se o usuário solicitou zerar o relatório, retorna métricas 100% zeradas
+  if (isReportsZerado(tenantId)) {
+    return ZERO_FINANCIAL_METRICS;
+  }
+
   if (!tenantId) return DEMO_FINANCIAL_METRICS[periodo] || DEMO_FINANCIAL_METRICS.mes;
 
   try {
@@ -114,7 +171,12 @@ export async function fetchFinancialReports(tenantId, periodo = "mes") {
       };
     }
   } catch (err) {
-    console.warn("[reportsService] Erro ao ler agregados do Firestore, usando consolidado demonstrativo:", err);
+    console.warn("[reportsService] Erro ao ler agregados do Firestore, usando consolidado:", err);
+  }
+
+  // Se não houver documento real e estiver zerado, mantém zero
+  if (isReportsZerado(tenantId)) {
+    return ZERO_FINANCIAL_METRICS;
   }
 
   return DEMO_FINANCIAL_METRICS[periodo] || DEMO_FINANCIAL_METRICS.mes;

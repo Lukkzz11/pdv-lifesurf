@@ -693,6 +693,11 @@ export async function ensureDriveFolder({ folderName = "LifeSurf ERP - Documento
     headers: { Authorization: `Bearer ${token}` }
   });
 
+  if (searchRes.status === 401) {
+    disconnectGoogle();
+    throw new Error("Sessão Google expirada ou inválida. Conecte sua conta Google novamente.");
+  }
+
   if (searchRes.ok) {
     const searchData = await searchRes.json();
     if (searchData.files && searchData.files.length > 0) {
@@ -713,6 +718,11 @@ export async function ensureDriveFolder({ folderName = "LifeSurf ERP - Documento
       description: "Pasta de armazenamento seguro de relatórios e documentos operacionais do LifeSurf ERP"
     })
   });
+
+  if (createRes.status === 401) {
+    disconnectGoogle();
+    throw new Error("Sessão Google expirada ou inválida. Conecte sua conta Google novamente.");
+  }
 
   if (!createRes.ok) {
     const errorBody = await createRes.json().catch(() => ({}));
@@ -847,6 +857,11 @@ export async function ensureMonthlyReceiptsDriveFolder({
     { headers: { Authorization: `Bearer ${token}` } }
   );
 
+  if (searchCompRes.status === 401) {
+    disconnectGoogle();
+    throw new Error("Sessão Google expirada ou inválida. Conecte sua conta Google novamente.");
+  }
+
   if (searchCompRes.ok) {
     const data = await searchCompRes.json();
     if (data.files && data.files.length > 0) {
@@ -869,6 +884,12 @@ export async function ensureMonthlyReceiptsDriveFolder({
         description: "Pasta central de comprovantes de gastos e receitas do LifeSurf ERP"
       })
     });
+
+    if (createCompRes.status === 401) {
+      disconnectGoogle();
+      throw new Error("Sessão Google expirada ou inválida. Conecte sua conta Google novamente.");
+    }
+
     if (createCompRes.ok) {
       const data = await createCompRes.json();
       comprovantesFolderId = data.id;
@@ -884,6 +905,11 @@ export async function ensureMonthlyReceiptsDriveFolder({
     `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(queryMonth)}&fields=files(id, name, webViewLink)`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
+
+  if (searchMonthRes.status === 401) {
+    disconnectGoogle();
+    throw new Error("Sessão Google expirada ou inválida. Conecte sua conta Google novamente.");
+  }
 
   if (searchMonthRes.ok) {
     const data = await searchMonthRes.json();
@@ -910,6 +936,11 @@ export async function ensureMonthlyReceiptsDriveFolder({
       description: `Comprovantes de gastos e entradas do mês de ${mesNome}/${targetYear}`
     })
   });
+
+  if (createMonthRes.status === 401) {
+    disconnectGoogle();
+    throw new Error("Sessão Google expirada ou inválida. Conecte sua conta Google novamente.");
+  }
 
   if (!createMonthRes.ok) {
     const errorBody = await createMonthRes.json().catch(() => ({}));
@@ -1004,5 +1035,94 @@ export async function uploadReceiptImageToDrive({
     thumbnailLink: fileData.thumbnailLink,
     folderName: monthFolder.name,
     folderWebViewLink: monthFolder.webViewLink
+  };
+}
+
+/**
+ * Faz upload do comprovante de Piso Loja (Prefeitura) direto para a pasta do Google Drive
+ * indicada pelo usuário ou pasta padrão dedicada.
+ */
+export async function uploadPisoLojaReceiptToDrive({
+  fileBlob,
+  fileName,
+  nomeDoPonto,
+  dataPagamento,
+  valor,
+  folderName = "LifeSurf - Comprovantes Piso Loja (Prefeitura)",
+  description = ""
+}) {
+  const token = getGoogleAccessToken();
+  if (!token) {
+    throw new Error("Conta Google não conectada. Conecte sua conta para salvar no Google Drive.");
+  }
+
+  if (!fileBlob) {
+    throw new Error("Arquivo de comprovante não fornecido.");
+  }
+
+  // 1. Localiza ou cria a pasta específica no Google Drive
+  const targetFolder = await ensureDriveFolder({ folderName });
+
+  const mimeType = fileBlob.type || "application/pdf";
+  const safeDataStr = dataPagamento ? dataPagamento.replace(/[^0-9]/g, "-") : new Date().toISOString().split("T")[0];
+  const safePonto = (nomeDoPonto || "Ponto_Loja").replace(/[^a-zA-Z0-9_-]/g, "_");
+  const ext = mimeType.includes("pdf") ? "pdf" : mimeType.includes("png") ? "png" : "jpg";
+  const safeFileName = fileName || `Comprovante_PisoLoja_${safePonto}_${safeDataStr}.${ext}`;
+
+  const fullDescription = description || `Comprovante de pagamento de Piso de Loja (Prefeitura) - Ponto: ${nomeDoPonto || "Padrão"} - Data: ${dataPagamento} - Valor: R$ ${valor || "0,00"}`;
+
+  // 2. Monta multipart/related
+  const boundary = `-------LifeSurfPisoBoundary${Date.now()}`;
+  const delimiter = `\r\n--${boundary}\r\n`;
+  const closeDelimiter = `\r\n--${boundary}--`;
+
+  const metadata = {
+    name: safeFileName,
+    mimeType,
+    parents: [targetFolder.id],
+    description: fullDescription
+  };
+
+  const metadataPart = `${delimiter}Content-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}`;
+  const fileHeader = `${delimiter}Content-Type: ${mimeType}\r\n\r\n`;
+
+  const arrayBuffer = await fileBlob.arrayBuffer();
+  const fileBytes = new Uint8Array(arrayBuffer);
+
+  const multipartBlob = new Blob(
+    [
+      new TextEncoder().encode(metadataPart),
+      new TextEncoder().encode(fileHeader),
+      fileBytes,
+      new TextEncoder().encode(closeDelimiter)
+    ],
+    { type: `multipart/related; boundary=${boundary}` }
+  );
+
+  const uploadUrl =
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink,thumbnailLink";
+  const uploadRes = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: multipartBlob
+  });
+
+  if (!uploadRes.ok) {
+    const errorBody = await uploadRes.json().catch(() => ({}));
+    throw new Error(errorBody.error?.message || `Erro ${uploadRes.status} ao enviar comprovante para o Google Drive`);
+  }
+
+  const fileData = await uploadRes.json();
+  return {
+    success: true,
+    fileId: fileData.id,
+    fileName: fileData.name,
+    webViewLink: fileData.webViewLink,
+    webContentLink: fileData.webContentLink,
+    thumbnailLink: fileData.thumbnailLink,
+    folderName: targetFolder.name || folderName,
+    folderWebViewLink: targetFolder.webViewLink
   };
 }

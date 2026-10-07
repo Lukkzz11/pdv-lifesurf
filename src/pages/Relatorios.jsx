@@ -2,7 +2,11 @@ import { useState, useEffect, useMemo } from "react";
 import { useTenant } from "../contexts/TenantContext";
 import {
   fetchFinancialReports,
-  generateDrePDF
+  generateDrePDF,
+  ZERO_FINANCIAL_METRICS,
+  zerarFinancialReports,
+  restaurarDemoFinancialReports,
+  isReportsZerado
 } from "../services/reportsService";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
@@ -55,17 +59,34 @@ export default function Relatorios() {
   const [dadosBase, setDadosBase] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // 1. CONFIGURAÇÃO DE MARGEM & CMV EDITÁVEIS
-  const [cmvPercentual, setCmvPercentual] = useState(() => {
+  // 1. CONFIGURAÇÃO DE MARGEM, CMV E PARÂMETROS AVANÇADOS
+  const [parametrosDRE, setParametrosDRE] = useState(() => {
     try {
-      const saved = localStorage.getItem(`lifesurf_dre_cmv_${activeTenantId || "default"}`);
-      if (saved) return Number(saved) || 40;
+      const saved = localStorage.getItem(`lifesurf_dre_params_${activeTenantId || "default"}`);
+      if (saved) return JSON.parse(saved);
     } catch {}
-    return 40;
+    return {
+      cmvPercentual: 40,
+      impostosPercentual: 6.0,
+      taxasCartaoPercentual: 3.5,
+      comissaoVendasPercentual: 2.5,
+      custosFixosMensais: 3500,
+      margemAlvoPercentual: 45.0
+    };
   });
 
+  const [cmvPercentual, setCmvPercentual] = useState(() => parametrosDRE.cmvPercentual || 40);
   const [modalConfigAberto, setModalConfigAberto] = useState(false);
-  const [novoCmvInput, setNovoCmvInput] = useState(String(cmvPercentual));
+  const [formParametros, setFormParametros] = useState({ ...parametrosDRE });
+
+  // Estado para "Zerar Relatório"
+  const [modalZerarAberto, setModalZerarAberto] = useState(false);
+  const [opcoesZerar, setOpcoesZerar] = useState({
+    faturamentoEFormas: true,
+    cheques: true,
+    ajustes: true,
+    margens: false
+  });
 
   // 2. GESTÃO DE CHEQUES (Adicionar, Editar e Excluir)
   const [cheques, setCheques] = useState(() => {
@@ -196,11 +217,20 @@ export default function Relatorios() {
     const descontosTotal = Number(dadosBase.descontos || 0) + totalDeducoesExtras;
     const faturamentoLiquido = Math.max(0, faturamentoBrutoAjustado - descontosTotal);
 
-    // CMV customizável
-    const taxaCmv = (Number(cmvPercentual) || 40) / 100;
+    // CMV e Despesas Variáveis customizáveis
+    const taxaCmv = (Number(parametrosDRE.cmvPercentual) || 40) / 100;
     const custoMercadorias = faturamentoLiquido * taxaCmv;
+
+    const taxasVariaveisTotal =
+      (Number(parametrosDRE.impostosPercentual) || 0) +
+      (Number(parametrosDRE.taxasCartaoPercentual) || 0) +
+      (Number(parametrosDRE.comissaoVendasPercentual) || 0);
+    const custoVariavelOperacional = faturamentoLiquido * (taxasVariaveisTotal / 100);
+
     const lucroBruto = Math.max(0, faturamentoLiquido - custoMercadorias);
+    const margemContribuicao = Math.max(0, faturamentoLiquido - custoMercadorias - custoVariavelOperacional);
     const margemLucroPercentual = faturamentoLiquido > 0 ? (lucroBruto / faturamentoLiquido) * 100 : 0;
+    const margemContribuicaoPercentual = faturamentoLiquido > 0 ? (margemContribuicao / faturamentoLiquido) * 100 : 0;
 
     return {
       ...dadosBase,
@@ -208,12 +238,16 @@ export default function Relatorios() {
       descontos: descontosTotal,
       faturamentoLiquido,
       custoMercadorias,
+      custoVariavelOperacional,
+      taxasVariaveisTotal,
       lucroBruto,
+      margemContribuicao,
       margemLucroPercentual,
+      margemContribuicaoPercentual,
       totalAcrescimos,
       totalDeducoesExtras
     };
-  }, [dadosBase, cmvPercentual, ajustes]);
+  }, [dadosBase, parametrosDRE, ajustes]);
 
   // Totalizadores de Cheques
   const totalChequesACompensar = useMemo(() => {
@@ -228,16 +262,80 @@ export default function Relatorios() {
       .reduce((acc, curr) => acc + (Number(curr.valor) || 0), 0);
   }, [cheques]);
 
-  // Funções de Gestão de Margem e Parâmetros
+  // Funções de Gestão de Margem e Parâmetros Robustos
+  const handleAbrirConfigMargem = () => {
+    setFormParametros({ ...parametrosDRE });
+    setModalConfigAberto(true);
+  };
+
   const handleSalvarConfigMargem = (e) => {
     e.preventDefault();
-    const novoCmv = Math.min(99, Math.max(1, Number(novoCmvInput) || 40));
-    setCmvPercentual(novoCmv);
+    const novosParams = {
+      cmvPercentual: Math.min(99, Math.max(1, Number(formParametros.cmvPercentual) || 40)),
+      impostosPercentual: Math.min(50, Math.max(0, Number(formParametros.impostosPercentual) || 0)),
+      taxasCartaoPercentual: Math.min(30, Math.max(0, Number(formParametros.taxasCartaoPercentual) || 0)),
+      comissaoVendasPercentual: Math.min(30, Math.max(0, Number(formParametros.comissaoVendasPercentual) || 0)),
+      custosFixosMensais: Math.max(0, Number(formParametros.custosFixosMensais) || 0),
+      margemAlvoPercentual: Math.min(90, Math.max(5, Number(formParametros.margemAlvoPercentual) || 40))
+    };
+
+    setParametrosDRE(novosParams);
+    setCmvPercentual(novosParams.cmvPercentual);
     try {
-      localStorage.setItem(`lifesurf_dre_cmv_${activeTenantId || "default"}`, String(novoCmv));
+      localStorage.setItem(`lifesurf_dre_params_${activeTenantId || "default"}`, JSON.stringify(novosParams));
+      localStorage.setItem(`lifesurf_dre_cmv_${activeTenantId || "default"}`, String(novosParams.cmvPercentual));
     } catch {}
     setModalConfigAberto(false);
-    toast.success(`Margem e CMV atualizados para ${novoCmv}%!`);
+    toast.success("Parâmetros de Margem, CMV e Custos atualizados com sucesso!");
+  };
+
+  // Zerar Relatório / Limpar dados acumulados e de teste
+  const handleConfirmarZerarRelatorio = () => {
+    try {
+      if (opcoesZerar.faturamentoEFormas) {
+        zerarFinancialReports(activeTenantId);
+        setDadosBase(ZERO_FINANCIAL_METRICS);
+      }
+      if (opcoesZerar.cheques) {
+        setCheques([]);
+        localStorage.removeItem(`lifesurf_cheques_${activeTenantId || "default"}`);
+      }
+      if (opcoesZerar.ajustes) {
+        setAjustes([]);
+        localStorage.removeItem(`lifesurf_ajustes_dre_${activeTenantId || "default"}`);
+      }
+      if (opcoesZerar.margens) {
+        const defaults = {
+          cmvPercentual: 40,
+          impostosPercentual: 6.0,
+          taxasCartaoPercentual: 3.5,
+          comissaoVendasPercentual: 2.5,
+          custosFixosMensais: 3500,
+          margemAlvoPercentual: 45.0
+        };
+        setParametrosDRE(defaults);
+        setCmvPercentual(40);
+        localStorage.removeItem(`lifesurf_dre_params_${activeTenantId || "default"}`);
+        localStorage.removeItem(`lifesurf_dre_cmv_${activeTenantId || "default"}`);
+      }
+
+      toast.success("Relatório completamente zerado com sucesso! Faturamento, lucro e formas de pagamento zerados.");
+      setModalZerarAberto(false);
+    } catch (err) {
+      toast.error("Erro ao zerar dados.");
+    }
+  };
+
+  const handleRestaurarDemonstrativo = async () => {
+    try {
+      restaurarDemoFinancialReports(activeTenantId);
+      const res = await fetchFinancialReports(activeTenantId, periodo);
+      setDadosBase(res);
+      toast.success("Dados demonstrativos restaurados com sucesso!");
+      setModalZerarAberto(false);
+    } catch (err) {
+      toast.error("Erro ao restaurar dados demonstrativos.");
+    }
   };
 
   // Funções de Gestão de Cheques
@@ -430,10 +528,21 @@ export default function Relatorios() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setModalConfigAberto(true)}
+            onClick={handleAbrirConfigMargem}
             leftIcon={<Sliders className="w-4 h-4 text-sky-400" />}
           >
             Editar Margem / CMV
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setModalZerarAberto(true)}
+            leftIcon={<Trash2 className="w-4 h-4 text-rose-400" />}
+            className="border-rose-500/30 text-rose-400 hover:bg-rose-500/10"
+            title="Zerar dados de testes e relatórios acumulados"
+          >
+            Zerar Relatório
           </Button>
 
           <Button
@@ -464,12 +573,12 @@ export default function Relatorios() {
               className={cn(
                 "flex items-center gap-2 px-4 py-2.5 rounded-t-xl font-bold text-xs transition-all cursor-pointer border-b-2",
                 isAtiva
-                  ? "border-sky-500 text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-500/10"
-                  : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-900/40"
+                  ? "border-sky-400 bg-sky-500 !text-white shadow-md font-extrabold"
+                  : "border-transparent text-slate-400 hover:text-white hover:bg-slate-800/60"
               )}
             >
-              <Icon className="w-4 h-4" />
-              <span>{tab.label}</span>
+              <Icon className={cn("w-4 h-4 shrink-0", isAtiva ? "!text-white" : "")} />
+              <span className={cn(isAtiva ? "!text-white font-extrabold" : "")}>{tab.label}</span>
             </button>
           );
         })}
@@ -875,33 +984,187 @@ export default function Relatorios() {
         </>
       )}
 
-      {/* MODAL 1: EDITAR MARGEM & CMV */}
-      <Modal isOpen={modalConfigAberto} onClose={() => setModalConfigAberto(false)} size="sm">
+      {/* MODAL 1: EDITAR MARGEM, CMV & ENGENHARIA DE PREÇO ROBUSTA */}
+      <Modal isOpen={modalConfigAberto} onClose={() => setModalConfigAberto(false)} size="lg">
         <form onSubmit={handleSalvarConfigMargem}>
           <ModalHeader
-            title="Parâmetros de Margem & CMV"
-            description="Ajuste o Custo das Mercadorias Vendidas (CMV) para recalcular os lucros do DRE."
+            title="Engenharia de Custos, Margem & CMV"
+            description="Configure as alíquotas de matéria-prima, impostos, taxas financeiras e custos fixos para análise precisa do DRE."
             onClose={() => setModalConfigAberto(false)}
           />
           <ModalBody className="space-y-4">
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Alíquota de CMV / Custo de Fabricação (%)
-              </label>
-              <Input
-                type="number"
-                min="1"
-                max="99"
-                step="1"
-                required
-                value={novoCmvInput}
-                onChange={(e) => setNovoCmvInput(e.target.value)}
-                placeholder="40"
-                className="text-lg font-bold"
-              />
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Exemplo: 40% significa que a cada R$ 100 vendidos, R$ 40 cobrem tecidos e costura, deixando 60% de Margem Bruta.
+            <div className="p-3 bg-sky-500/10 border border-sky-500/20 rounded-xl text-xs text-sky-200">
+              <p className="font-semibold mb-0.5">Gestão Estrutural de Rentabilidade</p>
+              <p className="text-sky-300/80">
+                Os percentuais definidos aqui alimentam os relatórios gerenciais, calculam o Markup multiplicador e a margem de contribuição real da empresa.
               </p>
+            </div>
+
+            {/* Grid de Campos Configuráveis */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">
+                  CMV / Custo de Fabricação (%) *
+                </label>
+                <Input
+                  type="number"
+                  step="0.5"
+                  min="1"
+                  max="90"
+                  value={formParametros.cmvPercentual}
+                  onChange={(e) =>
+                    setFormParametros({ ...formParametros, cmvPercentual: e.target.value })
+                  }
+                  required
+                />
+                <span className="text-[10px] text-slate-400">Tecido, costura, aviamentos e insumos</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">
+                  Impostos / Alíquota Tributária (%)
+                </label>
+                <Input
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  max="40"
+                  value={formParametros.impostosPercentual}
+                  onChange={(e) =>
+                    setFormParametros({ ...formParametros, impostosPercentual: e.target.value })
+                  }
+                  required
+                />
+                <span className="text-[10px] text-slate-400">Simples Nacional, DAS ou ICMS</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">
+                  Taxas Médias de Cartão / Gateway (%)
+                </label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max="20"
+                  value={formParametros.taxasCartaoPercentual}
+                  onChange={(e) =>
+                    setFormParametros({ ...formParametros, taxasCartaoPercentual: e.target.value })
+                  }
+                  required
+                />
+                <span className="text-[10px] text-slate-400">Média ponderada débito/crédito</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">
+                  Comissão de Vendas (%)
+                </label>
+                <Input
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  max="30"
+                  value={formParametros.comissaoVendasPercentual}
+                  onChange={(e) =>
+                    setFormParametros({ ...formParametros, comissaoVendasPercentual: e.target.value })
+                  }
+                  required
+                />
+                <span className="text-[10px] text-slate-400">Comissões pagas aos atendentes</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">
+                  Custos Fixos Mensais Estimados (R$)
+                </label>
+                <Input
+                  type="number"
+                  step="50"
+                  min="0"
+                  value={formParametros.custosFixosMensais}
+                  onChange={(e) =>
+                    setFormParametros({ ...formParametros, custosFixosMensais: e.target.value })
+                  }
+                  required
+                />
+                <span className="text-[10px] text-slate-400">Aluguel, energia, internet, salários base</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">
+                  Margem de Contribuição Alvo (%)
+                </label>
+                <Input
+                  type="number"
+                  step="0.5"
+                  min="5"
+                  max="80"
+                  value={formParametros.margemAlvoPercentual}
+                  onChange={(e) =>
+                    setFormParametros({ ...formParametros, margemAlvoPercentual: e.target.value })
+                  }
+                  required
+                />
+                <span className="text-[10px] text-slate-400">Objetivo de rentabilidade da operação</span>
+              </div>
+            </div>
+
+            {/* Simulador em Tempo Real */}
+            <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+              <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4" />
+                Simulação Dinâmica para cada R$ 100,00 Faturados
+              </h4>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+                <div className="p-2 rounded-lg bg-slate-900 border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Custo Insumos</span>
+                  <span className="font-bold text-rose-400">
+                    R$ {(Number(formParametros.cmvPercentual) || 0).toFixed(2)}
+                  </span>
+                </div>
+                <div className="p-2 rounded-lg bg-slate-900 border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Impostos + Taxas</span>
+                  <span className="font-bold text-amber-400">
+                    R${" "}
+                    {(
+                      (Number(formParametros.impostosPercentual) || 0) +
+                      (Number(formParametros.taxasCartaoPercentual) || 0) +
+                      (Number(formParametros.comissaoVendasPercentual) || 0)
+                    ).toFixed(2)}
+                  </span>
+                </div>
+                <div className="p-2 rounded-lg bg-slate-900 border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Margem Sobra</span>
+                  <span className="font-bold text-emerald-400">
+                    {(
+                      100 -
+                      (Number(formParametros.cmvPercentual) || 0) -
+                      (Number(formParametros.impostosPercentual) || 0) -
+                      (Number(formParametros.taxasCartaoPercentual) || 0) -
+                      (Number(formParametros.comissaoVendasPercentual) || 0)
+                    ).toFixed(1)}
+                    %
+                  </span>
+                </div>
+                <div className="p-2 rounded-lg bg-slate-900 border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Markup Sugerido</span>
+                  <span className="font-bold text-sky-400">
+                    {(
+                      100 /
+                      Math.max(
+                        10,
+                        100 -
+                          (Number(formParametros.impostosPercentual) || 0) -
+                          (Number(formParametros.taxasCartaoPercentual) || 0) -
+                          (Number(formParametros.comissaoVendasPercentual) || 0) -
+                          (Number(formParametros.margemAlvoPercentual) || 40)
+                      )
+                    ).toFixed(2)}
+                    x
+                  </span>
+                </div>
+              </div>
             </div>
           </ModalBody>
           <ModalFooter>
@@ -909,10 +1172,100 @@ export default function Relatorios() {
               Cancelar
             </Button>
             <Button variant="primary" type="submit" className="bg-sky-600 text-white font-bold">
-              Salvar Parâmetros
+              Salvar Parâmetros Avançados
             </Button>
           </ModalFooter>
         </form>
+      </Modal>
+
+      {/* MODAL NOVO: ZERAR RELATÓRIO & DADOS DE TESTE */}
+      <Modal isOpen={modalZerarAberto} onClose={() => setModalZerarAberto(false)} size="md">
+        <ModalHeader
+          title="Zerar Relatório & Limpar Dados de Teste"
+          description="Limpe dados acumulados de simulação e restaure valores para este ambiente."
+          onClose={() => setModalZerarAberto(false)}
+        />
+        <ModalBody className="space-y-4">
+          <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-300 space-y-1">
+            <p className="font-bold flex items-center gap-1.5 text-rose-200">
+              <AlertTriangle className="w-4 h-4 text-rose-400" />
+              Atenção: Ação Irreversível de Limpeza de Testes
+            </p>
+            <p>
+              Esta função permite reiniciar os valores do DRE e da controladoria para começar a operação limpa após testes e simulações.
+            </p>
+          </div>
+
+          <div className="space-y-3 p-4 bg-slate-950 rounded-xl border border-slate-800">
+            <label className="flex items-start gap-2.5 text-xs text-slate-200 cursor-pointer font-bold">
+              <input
+                type="checkbox"
+                checked={opcoesZerar.faturamentoEFormas}
+                onChange={(e) => setOpcoesZerar({ ...opcoesZerar, faturamentoEFormas: e.target.checked })}
+                className="rounded border-slate-700 text-rose-600 focus:ring-rose-500 mt-0.5"
+              />
+              <div>
+                <span className="text-white">Zerar Faturamento, Lucro, Vendas e Formas de Pagamento</span>
+                <p className="text-[11px] text-slate-400 font-normal">
+                  Redefine todos os indicadores de vendas, receitas, custos e formas de pagamento (PIX, cartões, dinheiro) para R$ 0,00.
+                </p>
+              </div>
+            </label>
+
+            <label className="flex items-center gap-2.5 text-xs text-slate-300 cursor-pointer pt-2 border-t border-slate-800/80">
+              <input
+                type="checkbox"
+                checked={opcoesZerar.ajustes}
+                onChange={(e) => setOpcoesZerar({ ...opcoesZerar, ajustes: e.target.checked })}
+                className="rounded border-slate-700 text-rose-600 focus:ring-rose-500"
+              />
+              <span>Zerar Lançamentos Avulsos e Ajustes Manuais do DRE</span>
+            </label>
+
+            <label className="flex items-center gap-2.5 text-xs text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={opcoesZerar.cheques}
+                onChange={(e) => setOpcoesZerar({ ...opcoesZerar, cheques: e.target.checked })}
+                className="rounded border-slate-700 text-rose-600 focus:ring-rose-500"
+              />
+              <span>Zerar Cheques e Títulos a Compensar</span>
+            </label>
+
+            <label className="flex items-center gap-2.5 text-xs text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={opcoesZerar.margens}
+                onChange={(e) => setOpcoesZerar({ ...opcoesZerar, margens: e.target.checked })}
+                className="rounded border-slate-700 text-rose-600 focus:ring-rose-500"
+              />
+              <span>Restaurar Parâmetros de CMV e Margem para o Padrão (40%)</span>
+            </label>
+          </div>
+        </ModalBody>
+        <ModalFooter className="flex items-center justify-between">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRestaurarDemonstrativo}
+            className="text-xs text-sky-400 border-sky-500/30 hover:bg-sky-500/10"
+          >
+            Restaurar Demonstração
+          </Button>
+
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" onClick={() => setModalZerarAberto(false)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleConfirmarZerarRelatorio}
+              className="bg-rose-600 hover:bg-rose-500 text-white font-bold"
+            >
+              Confirmar e Zerar Relatório
+            </Button>
+          </div>
+        </ModalFooter>
       </Modal>
 
       {/* MODAL 2: ADICIONAR / EDITAR CHEQUE */}

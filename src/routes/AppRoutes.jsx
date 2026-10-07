@@ -9,6 +9,7 @@ import EstoqueLoja from "../pages/EstoqueLoja";
 import EstoqueFabrica from "../pages/EstoqueFabrica";
 import Pedidos from "../pages/Pedidos";
 import Pdv from "../pages/Pdv";
+import CaixaLoja from "../pages/CaixaLoja";
 import CatalogoPublico from "../pages/CatalogoPublico";
 import Relatorios from "../pages/Relatorios";
 import Etiquetas from "../pages/Etiquetas";
@@ -18,6 +19,7 @@ import GerenciarCatalogo from "../pages/GerenciarCatalogo";
 import Clientes from "../pages/Clientes";
 import ContasAVer from "../pages/ContasAVer";
 import FinanceiroGastos from "../pages/FinanceiroGastos";
+import ArenaSandplay from "../pages/ArenaSandplay";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
@@ -107,6 +109,8 @@ export default function AppRoutes() {
 
           {/* Módulos Operacionais */}
           <Route path="/pdv" element={<Pdv />} />
+          <Route path="/caixa-loja" element={<CaixaLoja />} />
+          <Route path="/caixa" element={<Navigate to="/caixa-loja" replace />} />
           <Route path="/estoque-loja" element={<EstoqueLoja />} />
           <Route path="/estoque-fabrica" element={<EstoqueFabrica />} />
           <Route path="/estoque" element={<Navigate to="/estoque-loja" replace />} />
@@ -119,6 +123,10 @@ export default function AppRoutes() {
           <Route path="/financeiro" element={<FinanceiroGastos />} />
           <Route path="/gastos" element={<Navigate to="/financeiro" replace />} />
           <Route path="/livro-caixa" element={<Navigate to="/financeiro" replace />} />
+
+          {/* Arena Sandplay (Esporte & Lazer / Alugar Horário) */}
+          <Route path="/arena-sandplay" element={<ArenaSandplay />} />
+          <Route path="/alugar-horario" element={<Navigate to="/arena-sandplay" replace />} />
 
           {/* Ajustes e Configurações da Empresa & ERP */}
           <Route path="/configuracoes" element={<Configuracoes />} />

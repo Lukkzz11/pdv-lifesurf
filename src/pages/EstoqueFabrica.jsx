@@ -485,17 +485,17 @@ export default function EstoqueFabrica() {
               className={cn(
                 "flex items-center gap-2 px-4 py-2.5 rounded-t-xl font-bold text-xs transition-all cursor-pointer border-b-2",
                 isAtiva
-                  ? "border-sky-500 text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-500/10"
-                  : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-900/40"
+                  ? "border-sky-400 bg-sky-500 !text-white shadow-md font-extrabold"
+                  : "border-transparent text-slate-400 hover:text-white hover:bg-slate-800/60"
               )}
             >
-              <Icon className="w-4 h-4" />
-              <span>{tab.label}</span>
+              <Icon className={cn("w-4 h-4 shrink-0", isAtiva ? "!text-white" : "")} />
+              <span className={cn(isAtiva ? "!text-white font-extrabold" : "")}>{tab.label}</span>
               <span className={cn(
                 "px-1.5 py-0.5 rounded-full text-[10px] font-mono",
                 isAtiva
-                  ? "bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-300 font-bold"
-                  : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                  ? "bg-white/25 !text-white font-extrabold shadow-sm"
+                  : "bg-slate-800 text-slate-300"
               )}>
                 {tab.count}
               </span>

@@ -22,7 +22,9 @@ import {
   Calendar,
   Tag,
   ShoppingBag,
-  Receipt
+  Receipt,
+  DollarSign,
+  Trophy
 } from "lucide-react";
 
 export function Sidebar({ collapsed, onToggleCollapse, isMobileOpen, onCloseMobile }) {
@@ -47,27 +49,46 @@ export function Sidebar({ collapsed, onToggleCollapse, isMobileOpen, onCloseMobi
       shortLabel: "Painel",
       icon: LayoutDashboard
     },
-    {
-      to: `/catalogo/${activeTenantId || "lifesurf"}`,
-      label: "Catálogo Online",
-      shortLabel: "Catálogo",
-      icon: Globe,
-      badge: "Público",
-      external: true
-    },
-    {
-      to: "/gerenciar-catalogo",
-      label: "Editar Catálogo",
-      shortLabel: "Vitrine",
-      icon: ShoppingBag,
-      badge: "Gestão"
-    },
+    ...(activeTenantId === "arena-sandplay"
+      ? [
+          {
+            to: "/arena-sandplay",
+            label: "Alugar Horário",
+            shortLabel: "Quadras",
+            icon: Trophy,
+            badge: "Agenda"
+          }
+        ]
+      : [
+          {
+            to: `/catalogo/${activeTenantId || "lifesurf"}`,
+            label: "Catálogo Online",
+            shortLabel: "Catálogo",
+            icon: Globe,
+            badge: "Público",
+            external: true
+          },
+          {
+            to: "/gerenciar-catalogo",
+            label: "Editar Catálogo",
+            shortLabel: "Vitrine",
+            icon: ShoppingBag,
+            badge: "Gestão"
+          }
+        ]),
     {
       to: "/pdv",
       label: "Frente de Caixa",
       shortLabel: "PDV",
       icon: ShoppingCart,
       badge: "F2"
+    },
+    {
+      to: "/caixa-loja",
+      label: "Caixa Loja",
+      shortLabel: "Caixa",
+      icon: DollarSign,
+      badge: "Vendas"
     },
     {
       to: "/estoque-loja",

@@ -1,14 +1,24 @@
 import { NavLink } from "react-router-dom";
-import { ShoppingCart, Package, Users, BarChart3, Menu } from "lucide-react";
+import { ShoppingCart, DollarSign, Package, BarChart3, Menu, Trophy } from "lucide-react";
+import { useTenant } from "../../contexts/TenantContext";
 import { cn } from "../../utils/cn";
 
 export function MobileNav({ onOpenMobileMenu }) {
-  const items = [
-    { to: "/pdv", label: "PDV", icon: ShoppingCart },
-    { to: "/estoque", label: "Estoque", icon: Package },
-    { to: "/clientes", label: "Clientes", icon: Users },
-    { to: "/relatorios", label: "Relatórios", icon: BarChart3 }
-  ];
+  const { activeTenantId } = useTenant();
+
+  const items = activeTenantId === "arena-sandplay"
+    ? [
+        { to: "/arena-sandplay", label: "Quadras", icon: Trophy },
+        { to: "/pdv", label: "PDV", icon: ShoppingCart },
+        { to: "/caixa-loja", label: "Caixa", icon: DollarSign },
+        { to: "/relatorios", label: "DRE", icon: BarChart3 }
+      ]
+    : [
+        { to: "/pdv", label: "PDV", icon: ShoppingCart },
+        { to: "/caixa-loja", label: "Caixa", icon: DollarSign },
+        { to: "/estoque", label: "Estoque", icon: Package },
+        { to: "/relatorios", label: "DRE", icon: BarChart3 }
+      ];
 
   return (
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 h-16 glass-dropdown border-t border-slate-800/80 px-2 flex items-center justify-around">

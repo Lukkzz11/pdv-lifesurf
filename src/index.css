@@ -127,6 +127,81 @@
 }
 
 /* ==========================================================================
+   PROPAGAÇÃO UNIVERSAL DE TEMA: FUNDOS, CARDS, BORDAS E SUPERFÍCIES
+   Garante que qualquer alteração de cor, fundo ou tema escolhida pelo usuário
+   seja refletida instantaneamente no Painel Geral e em todo o ERP.
+   ========================================================================== */
+
+/* Fundo Geral da Aplicação */
+html,
+body,
+.bg-slate-950,
+[class~="bg-slate-950"],
+[class*="bg-slate-950/"] {
+  background-color: var(--bg-main) !important;
+}
+
+/* Superfícies de Cards, Painéis, Blocos e Tabelas */
+.card-themed,
+.bg-slate-900,
+[class~="bg-slate-900"],
+[class*="bg-slate-900/"] {
+  background-color: var(--bg-card) !important;
+}
+
+/* Superfícies Secundárias e Cards Sutis / Menus */
+.bg-slate-850,
+[class~="bg-slate-850"],
+[class*="bg-slate-850/"] {
+  background-color: var(--bg-card-hover, var(--bg-card)) !important;
+}
+
+/* Bordas Sutis e Divisórias Gerais */
+.border-slate-800,
+.border-slate-800\/60,
+.border-slate-800\/80,
+.border-slate-800\/90,
+[class~="border-slate-800"],
+[class*="border-slate-800/"] {
+  border-color: var(--border-subtle) !important;
+}
+
+/* Estados de Hover em superfícies e bordas */
+[class*="hover:bg-slate-900"]:hover,
+[class*="hover:bg-slate-850"]:hover {
+  background-color: var(--bg-card-hover, var(--bg-card)) !important;
+}
+
+[class*="hover:border-slate-700"]:hover,
+[class*="hover:border-slate-800"]:hover {
+  border-color: var(--brand-border, var(--border-subtle)) !important;
+}
+
+/* Títulos e Cabeçalhos Dinâmicos */
+[data-theme] h1,
+[data-theme] h2,
+[data-theme] h3,
+.text-heading-dynamic {
+  color: var(--text-heading);
+}
+
+/* Adaptação inteligente para Modo Claro */
+[data-mode="light"] h1.text-white,
+[data-mode="light"] h2.text-white,
+[data-mode="light"] h3.text-white,
+[data-mode="light"] p.text-white,
+[data-mode="light"] span.text-white:not(button *, .badge *, [class*="bg-sky-"] *, [class*="bg-emerald-"] *) {
+  color: var(--text-heading, #0f172a) !important;
+}
+
+[data-mode="light"] .text-slate-400,
+[data-mode="light"] .text-slate-300,
+[data-mode="light"] .text-slate-200,
+[data-mode="light"] .text-slate-100 {
+  color: #475569 !important;
+}
+
+/* ==========================================================================
    PROPAGAÇÃO UNIVERSAL DE CORES (ACOMPANHA QUALQUER TEMA OU COR ESCOLHIDA)
    ========================================================================== */
 
@@ -165,6 +240,59 @@ button[class*="bg-sky-600"],
 a[class*="bg-sky-500"],
 a[class*="bg-sky-600"] {
   background-color: var(--brand-primary) !important;
+}
+
+/* ==========================================================================
+   GARANTIA DE CONTRASTE TOTAL: ABAS E ELEMENTOS SELECIONADOS
+   Evita que o texto fique na mesma cor do fundo sólido, forçando contraste branco nítido.
+   ========================================================================== */
+button[class*="rounded-t-xl"][class*="border-sky-500"],
+button[class*="rounded-t-xl"][class*="bg-sky-500"],
+button[class*="rounded-t-xl"][class*="border-emerald-500"],
+button[class*="rounded-t-xl"][class*="bg-emerald-500"],
+button[class*="bg-sky-500"]:not([class*="bg-sky-500/"]),
+button[class*="bg-sky-600"]:not([class*="bg-sky-600/"]),
+button[class*="bg-emerald-500"]:not([class*="bg-emerald-500/"]),
+button[class*="bg-emerald-600"]:not([class*="bg-emerald-600/"]),
+a[class*="bg-sky-500"]:not([class*="bg-sky-500/"]),
+a[class*="bg-emerald-500"]:not([class*="bg-emerald-500/"]),
+.tab-active {
+  color: #ffffff !important;
+}
+
+button[class*="rounded-t-xl"][class*="border-sky-500"] *,
+button[class*="rounded-t-xl"][class*="bg-sky-500"] *,
+button[class*="rounded-t-xl"][class*="border-emerald-500"] *,
+button[class*="rounded-t-xl"][class*="bg-emerald-500"] *,
+button[class*="bg-sky-500"]:not([class*="bg-sky-500/"]) *,
+button[class*="bg-sky-600"]:not([class*="bg-sky-600/"]) *,
+button[class*="bg-emerald-500"]:not([class*="bg-emerald-500/"]) *,
+button[class*="bg-emerald-600"]:not([class*="bg-emerald-600/"]) *,
+a[class*="bg-sky-500"]:not([class*="bg-sky-500/"]) *,
+a[class*="bg-emerald-500"]:not([class*="bg-emerald-500/"]) *,
+.tab-active * {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
+}
+
+/* Badges e contadores dentro de abas ativas */
+button[class*="rounded-t-xl"][class*="border-sky-500"] span,
+button[class*="rounded-t-xl"][class*="bg-sky-500"] span,
+button[class*="rounded-t-xl"][class*="border-emerald-500"] span,
+button[class*="rounded-t-xl"][class*="bg-emerald-500"] span {
+  color: #ffffff !important;
+}
+
+button[class*="rounded-t-xl"][class*="border-sky-500"] span[class*="font-mono"],
+button[class*="rounded-t-xl"][class*="bg-sky-500"] span[class*="font-mono"],
+button[class*="rounded-t-xl"][class*="border-emerald-500"] span[class*="font-mono"],
+button[class*="rounded-t-xl"][class*="bg-emerald-500"] span[class*="font-mono"],
+button[class*="rounded-t-xl"][class*="border-sky-500"] span[class*="rounded-full"],
+button[class*="rounded-t-xl"][class*="bg-sky-500"] span[class*="rounded-full"],
+button[class*="rounded-t-xl"][class*="border-emerald-500"] span[class*="rounded-full"],
+button[class*="rounded-t-xl"][class*="bg-emerald-500"] span[class*="rounded-full"] {
+  background-color: rgba(255, 255, 255, 0.25) !important;
+  color: #ffffff !important;
 }
 
 /* Estados de Hover em Fundos Sólidos */

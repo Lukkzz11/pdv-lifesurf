@@ -10,7 +10,13 @@ export function MainLayout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col antialiased">
+    <div
+      className="min-h-screen flex flex-col antialiased transition-colors duration-200"
+      style={{
+        backgroundColor: "var(--bg-main, #090d16)",
+        color: "var(--text-body, #f8fafc)"
+      }}
+    >
       {/* Sidebar para Desktop e Drawer para Mobile */}
       <Sidebar
         collapsed={sidebarCollapsed}

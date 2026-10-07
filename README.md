@@ -1,16 +1,30 @@
-# React + Vite
+# LifeSurf ERP & PDV • Multiempresa Cloud & Offline-First
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Sistema corporativo de gestão para confecção de moda, comércio balcão/atacado, arenas esportivas e finanças integradas.
 
-Currently, two official plugins are available:
+## 🚀 Tecnologias
+- **Frontend:** React 19, Vite 8, TailwindCSS v4, Lucide React
+- **Backend & Cloud:** Firebase (Firestore, Auth, Storage)
+- **Integrações:** Google Workspace (Drive API, Calendar API, Gmail API)
+- **Documentos & Cupom:** jsPDF, AutoTable, Impressão Térmica 80mm ESC/POS
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 📖 Documentação Técnica Completa
+Para consultar a documentação detalhada da arquitetura, estrutura de coleções no banco de dados, tabela de rotas, integrações externas e detalhes de cada módulo, acesse:
+👉 **[DOCUMENTACAO_TECNICA.md](./DOCUMENTACAO_TECNICA.md)**
 
-## React Compiler
+## 💻 Como Rodar o Projeto
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+1. Instale as dependências:
+   ```bash
+   npm install
+   ```
 
-## Expanding the ESLint configuration
+2. Inicie o servidor de desenvolvimento:
+   ```bash
+   npm run dev
+   ```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+3. Para gerar o build de produção:
+   ```bash
+   npm run build
+   ```

@@ -11,7 +11,9 @@ export const THEME_PRESETS = [
     primaryColor: "#0284c7", // sky-600
     accentColor: "#38bdf8",  // sky-400
     bgMain: "#090d16",
-    bgCard: "rgba(15, 23, 42, 0.8)",
+    bgCard: "rgba(15, 23, 42, 0.85)",
+    bgCardHover: "rgba(30, 41, 59, 0.95)",
+    borderSubtle: "rgba(255, 255, 255, 0.08)",
     badgeText: "Oficial",
     badgeColor: "sky"
   },
@@ -24,6 +26,8 @@ export const THEME_PRESETS = [
     accentColor: "#fb923c",  // orange-400
     bgMain: "#140d0a",
     bgCard: "rgba(30, 20, 16, 0.85)",
+    bgCardHover: "rgba(48, 30, 24, 0.95)",
+    borderSubtle: "rgba(249, 115, 22, 0.2)",
     badgeText: "Surfwear",
     badgeColor: "warning"
   },
@@ -36,6 +40,8 @@ export const THEME_PRESETS = [
     accentColor: "#34d399",  // emerald-400
     bgMain: "#04130e",
     bgCard: "rgba(6, 28, 20, 0.85)",
+    bgCardHover: "rgba(12, 45, 33, 0.95)",
+    borderSubtle: "rgba(52, 211, 153, 0.2)",
     badgeText: "Finanças",
     badgeColor: "success"
   },
@@ -48,6 +54,8 @@ export const THEME_PRESETS = [
     accentColor: "#a855f7",  // purple-500
     bgMain: "#000000",
     bgCard: "rgba(12, 14, 20, 0.95)",
+    bgCardHover: "rgba(22, 25, 34, 0.98)",
+    borderSubtle: "rgba(255, 255, 255, 0.12)",
     badgeText: "AMOLED",
     badgeColor: "purple"
   },
@@ -60,6 +68,8 @@ export const THEME_PRESETS = [
     accentColor: "#0369a1",
     bgMain: "#f8fafc",
     bgCard: "#ffffff",
+    bgCardHover: "#f1f5f9",
+    borderSubtle: "rgba(0, 0, 0, 0.08)",
     badgeText: "Clean Light",
     badgeColor: "neutral"
   },
@@ -71,11 +81,24 @@ export const THEME_PRESETS = [
     primaryColor: "#0284c7",
     accentColor: "#38bdf8",
     bgMain: "#090d16",
-    bgCard: "rgba(15, 23, 42, 0.8)",
+    bgCard: "rgba(15, 23, 42, 0.85)",
+    bgCardHover: "rgba(30, 41, 59, 0.95)",
+    borderSubtle: "rgba(255, 255, 255, 0.08)",
     badgeText: "Custom",
     badgeColor: "pink"
   }
 ];
+
+export const AVAILABLE_FONTS = [
+  { id: "system", nome: "Padrão do Sistema (Rápido / Nativo)", family: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" },
+  { id: "inter", nome: "Inter (Moderno & Corporativo)", family: "'Inter', sans-serif" },
+  { id: "outfit", nome: "Outfit (Elegante & Surfwear)", family: "'Outfit', sans-serif" },
+  { id: "poppins", nome: "Poppins (Geométrico & Amigável)", family: "'Poppins', sans-serif" },
+  { id: "roboto", nome: "Roboto (Google Padrão / Legível)", family: "'Roboto', sans-serif" },
+  { id: "montserrat", nome: "Montserrat (Premium & Forte)", family: "'Montserrat', sans-serif" },
+  { id: "plus-jakarta-sans", nome: "Plus Jakarta Sans (Tech & ERP)", family: "'Plus Jakarta Sans', sans-serif" }
+];
+
 
 function hexToRgb(hex) {
   if (!hex) return "2, 132, 199";
@@ -154,31 +177,71 @@ export function ThemeProvider({ children, activeTenantId = null }) {
     root.style.setProperty("--brand-subtle", `rgba(${rgbStr}, 0.12)`);
     root.style.setProperty("--brand-border", `rgba(${rgbStr}, 0.35)`);
 
+    // 4. Aplica fundos, blocos e superfícies configuráveis
+    let defaultBgMain = preset?.bgMain || "#090d16";
+    let defaultBgCard = preset?.bgCard || "#0f172a";
+    let defaultBgHover = "rgba(30, 41, 59, 0.85)";
+    let defaultBorder = "rgba(255, 255, 255, 0.08)";
+
     if (isLight) {
-      root.style.setProperty("--bg-main", "#f8fafc");
-      root.style.setProperty("--bg-card", "#ffffff");
-      root.style.setProperty("--bg-card-hover", "#f1f5f9");
-      root.style.setProperty("--border-subtle", "rgba(0, 0, 0, 0.08)");
+      defaultBgMain = "#f8fafc";
+      defaultBgCard = "#ffffff";
+      defaultBgHover = "#f1f5f9";
+      defaultBorder = "rgba(0, 0, 0, 0.08)";
     } else if (config.id === "dark-stealth") {
-      root.style.setProperty("--bg-main", "#000000");
-      root.style.setProperty("--bg-card", "#0c0e14");
-      root.style.setProperty("--bg-card-hover", "#161922");
-      root.style.setProperty("--border-subtle", "rgba(255, 255, 255, 0.1)");
+      defaultBgMain = "#000000";
+      defaultBgCard = "#0c0e14";
+      defaultBgHover = "#161922";
+      defaultBorder = "rgba(255, 255, 255, 0.1)";
     } else if (config.id === "emerald-pro") {
-      root.style.setProperty("--bg-main", "#03120c");
-      root.style.setProperty("--bg-card", "#062117");
-      root.style.setProperty("--bg-card-hover", "#0c3224");
-      root.style.setProperty("--border-subtle", "rgba(52, 211, 153, 0.15)");
+      defaultBgMain = "#03120c";
+      defaultBgCard = "#062117";
+      defaultBgHover = "#0c3224";
+      defaultBorder = "rgba(52, 211, 153, 0.15)";
     } else if (config.id === "sunset-orange") {
-      root.style.setProperty("--bg-main", "#120c09");
-      root.style.setProperty("--bg-card", "#22140e");
-      root.style.setProperty("--bg-card-hover", "#331f16");
-      root.style.setProperty("--border-subtle", "rgba(249, 115, 22, 0.15)");
-    } else {
-      root.style.setProperty("--bg-main", preset?.bgMain || "#090d16");
-      root.style.setProperty("--bg-card", preset?.bgCard || "#0f172a");
-      root.style.setProperty("--bg-card-hover", "rgba(30, 41, 59, 0.85)");
-      root.style.setProperty("--border-subtle", "rgba(255, 255, 255, 0.08)");
+      defaultBgMain = "#120c09";
+      defaultBgCard = "#22140e";
+      defaultBgHover = "#331f16";
+      defaultBorder = "rgba(249, 115, 22, 0.15)";
+    }
+
+    const bgMain = config.bgMain || defaultBgMain;
+    const bgCard = config.bgCard || defaultBgCard;
+    const bgCardHover = config.bgCardHover || defaultBgHover;
+    const borderSubtle = config.borderSubtle || defaultBorder;
+
+    root.style.setProperty("--bg-main", bgMain);
+    root.style.setProperty("--bg-card", bgCard);
+    root.style.setProperty("--bg-card-hover", bgCardHover);
+    root.style.setProperty("--border-subtle", borderSubtle);
+
+    // 5. Aplica Tipografia Personalizada (Fonte e Cores de Texto)
+    const fontFamily = config.fontFamily || "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    root.style.setProperty("--font-family", fontFamily);
+    body.style.fontFamily = fontFamily;
+
+    const headingColor = config.headingColor || (isLight ? "#0f172a" : "#ffffff");
+    const bodyTextColor = config.bodyTextColor || (isLight ? "#1e293b" : "#f8fafc");
+
+    root.style.setProperty("--text-heading", headingColor);
+    root.style.setProperty("--text-body", bodyTextColor);
+    body.style.color = bodyTextColor;
+
+    // 6. Aplica diretamente a cor de fundo nos elementos raiz do documento
+    root.style.backgroundColor = bgMain;
+    body.style.backgroundColor = bgMain;
+
+    // Carrega dinamicamente a fonte do Google Fonts se necessário
+    if (config.fontFamily && !config.fontFamily.includes("system-ui")) {
+      const fontName = config.fontFamily.split(",")[0].replace(/['"]/g, "").trim();
+      const fontId = `google-font-${fontName.toLowerCase().replace(/\s+/g, "-")}`;
+      if (typeof document !== "undefined" && !document.getElementById(fontId)) {
+        const link = document.createElement("link");
+        link.id = fontId;
+        link.rel = "stylesheet";
+        link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(fontName)}:wght@300;400;500;600;700;800;900&display=swap`;
+        document.head.appendChild(link);
+      }
     }
   }, []);
 
@@ -202,7 +265,13 @@ export function ThemeProvider({ children, activeTenantId = null }) {
               prev.id === cfg.id &&
               prev.primaryColor === cfg.primaryColor &&
               prev.accentColor === cfg.accentColor &&
-              prev.mode === cfg.mode
+              prev.mode === cfg.mode &&
+              prev.bgMain === cfg.bgMain &&
+              prev.bgCard === cfg.bgCard &&
+              prev.borderSubtle === cfg.borderSubtle &&
+              prev.fontFamily === cfg.fontFamily &&
+              prev.headingColor === cfg.headingColor &&
+              prev.bodyTextColor === cfg.bodyTextColor
             ) {
               return prev;
             }
@@ -248,7 +317,11 @@ export function ThemeProvider({ children, activeTenantId = null }) {
           id: found.id,
           primaryColor: found.primaryColor,
           accentColor: found.accentColor,
-          mode: found.mode
+          mode: found.mode,
+          bgMain: found.bgMain,
+          bgCard: found.bgCard,
+          bgCardHover: found.bgCardHover,
+          borderSubtle: found.borderSubtle
         };
       }
     }
@@ -287,6 +360,18 @@ export function ThemeProvider({ children, activeTenantId = null }) {
     changeTheme(newConfig, true);
   }, [changeTheme]);
 
+  /**
+   * Atualização avançada de identidade visual (cores de fundo, cards, bordas e tipografia)
+   */
+  const setCustomAppearance = useCallback((appearanceConfig) => {
+    const newConfig = {
+      ...themeConfig,
+      id: "custom",
+      ...appearanceConfig
+    };
+    changeTheme(newConfig, true);
+  }, [changeTheme, themeConfig]);
+
   const activePreset = useMemo(() => {
     return THEME_PRESETS.find((p) => p.id === themeConfig.id) || THEME_PRESETS[0];
   }, [themeConfig.id]);
@@ -297,9 +382,11 @@ export function ThemeProvider({ children, activeTenantId = null }) {
     currentThemeId: themeConfig.id || "lifesurf-blue",
     isLightMode: themeConfig.mode === "light" || themeConfig.id === "light-clean",
     presets: THEME_PRESETS,
+    availableFonts: AVAILABLE_FONTS,
     changeTheme,
-    setCustomColors
-  }), [themeConfig, activePreset, changeTheme, setCustomColors]);
+    setCustomColors,
+    setCustomAppearance
+  }), [themeConfig, activePreset, changeTheme, setCustomColors, setCustomAppearance]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

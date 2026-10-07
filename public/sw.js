@@ -35,47 +35,54 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-// 3. Interceptação de requisições (Cache-first para estáticos, Network-first para API/Firestore)
+// 3. Interceptação de requisições (Cache-first para estáticos locais, bypass total para APIs externas)
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Não interceptar requisições para o Firestore, Auth ou APIs externas
+  // Não interceptar requisições para Google, Firebase ou qualquer domínio externo
   if (
-    url.hostname.includes("firestore.googleapis.com") ||
-    url.hostname.includes("identitytoolkit.googleapis.com") ||
+    url.hostname.includes("googleapis.com") ||
     url.hostname.includes("firebaseio.com") ||
+    url.hostname.includes("google.com") ||
+    url.hostname !== self.location.hostname ||
     request.method !== "GET"
   ) {
     return;
   }
 
-  // Navegação de páginas (SPA): Network first com fallback para /index.html
+  // Navegação de páginas (SPA): Network first com fallback limpo para /index.html
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request).catch(() => {
-        return caches.match("/index.html") || caches.match("/");
+      fetch(request).catch(async () => {
+        const cached = await caches.match("/index.html");
+        return cached || (await caches.match("/")) || new Response("LifeSurf Offline", {
+          status: 200,
+          headers: { "Content-Type": "text/html" }
+        });
       })
     );
     return;
   }
 
-  // Assets estáticos (JS, CSS, SVGs, imagens locais): Stale-While-Revalidate
+  // Assets estáticos locais
   event.respondWith(
     caches.match(request).then((cachedResponse) => {
-      const fetchPromise = fetch(request).then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200 && networkResponse.type === "basic") {
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(request, responseToCache);
-          });
-        }
-        return networkResponse;
-      }).catch(() => {
-        // Falha de rede silenciosa se já houver cache
-      });
+      if (cachedResponse) return cachedResponse;
 
-      return cachedResponse || fetchPromise;
+      return fetch(request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200 && networkResponse.type === "basic") {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(request, responseToCache);
+            });
+          }
+          return networkResponse;
+        })
+        .catch(() => {
+          return new Response("", { status: 408, statusText: "Offline Timeout" });
+        });
     })
   );
 });

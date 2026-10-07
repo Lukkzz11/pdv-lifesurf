@@ -154,7 +154,7 @@ export default function SelectCompany() {
         iconBg: "bg-amber-500/10 border-amber-500/30 text-amber-400",
         badgeVariant: "warning",
         badgeText: "Beach Tennis & Lazer",
-        defaultRoute: "/workspace"
+        defaultRoute: "/arena-sandplay"
       };
     }
     if (id.includes("jarbas") || id.includes("aluguel") || id.includes("alugueis")) {

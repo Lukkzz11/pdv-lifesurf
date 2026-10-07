@@ -35,6 +35,29 @@ export const DEFAULT_COMPANY = {
     primaryColor: "#0284c7",
     accentColor: "#38bdf8",
     mode: "dark"
+  },
+  painelConfig: {
+    exibirAlertasCriticos: true,
+    exibirAcoesCabecalho: true,
+    colunasGrid: "3",
+    densidadeCards: "padrao",
+    ordemModulos: [
+      "pdv",
+      "caixa-loja",
+      "estoque-loja",
+      "estoque-fabrica",
+      "estoque",
+      "pedidos",
+      "calendario",
+      "etiquetas",
+      "relatorios",
+      "catalogo",
+      "clientes",
+      "a-ver",
+      "financeiro",
+      "configuracoes"
+    ],
+    modulosDesativados: []
   }
 };
 
@@ -354,4 +377,129 @@ export async function updateCompanyTheme(tenantId, themeConfig) {
     }
   }
 }
+
+/**
+ * Configuração Padrão do Painel Geral (Workspace)
+ */
+export const DEFAULT_PAINEL_CONFIG = {
+  exibirAlertasCriticos: true,
+  exibirAcoesCabecalho: true,
+  colunasGrid: "3", // "2" (Amplo) | "3" (Padrão) | "4" (Compacto)
+  densidadeCards: "padrao", // "compacto" | "padrao" | "detalhado"
+  ordemModulos: [
+    "pdv",
+    "caixa-loja",
+    "estoque-loja",
+    "estoque-fabrica",
+    "estoque",
+    "pedidos",
+    "calendario",
+    "etiquetas",
+    "relatorios",
+    "catalogo",
+    "clientes",
+    "a-ver",
+    "financeiro",
+    "configuracoes"
+  ],
+  modulosDesativados: []
+};
+
+/**
+ * Catálogo canônico de todos os módulos gerenciáveis do Painel Geral
+ */
+export const LISTA_MODULOS_DISPONIVEIS = [
+  { id: "pdv", titulo: "Frente de Caixa (PDV)", descricao: "Vendas rápidas no balcão, leitor de código de barras e cupom 80mm.", rota: "/pdv" },
+  { id: "caixa-loja", titulo: "Caixa Loja", descricao: "Centralização de vendas PDV, operador, cancelamentos e relatórios.", rota: "/caixa-loja" },
+  { id: "estoque-loja", titulo: "Estoque Loja (Balcão)", descricao: "Produtos prontos para venda direta e grade de tamanhos.", rota: "/estoque-loja" },
+  { id: "estoque-fabrica", titulo: "Estoque Fábrica (Produção)", descricao: "Matéria-prima, rolos, lotes em confecção e transferência à loja.", rota: "/estoque-fabrica" },
+  { id: "estoque", titulo: "Produtos & Catálogo", descricao: "Cadastro de produtos, preços de atacado/varejo e referências.", rota: "/estoque" },
+  { id: "pedidos", titulo: "Pedidos & Encomendas", descricao: "Controle de pedidos de clientes, WhatsApp e produção sob demanda.", rota: "/pedidos" },
+  { id: "calendario", titulo: "Calendário Operacional", descricao: "Centralização visual de entregas, retiradas no balcão e prazos.", rota: "/calendario" },
+  { id: "etiquetas", titulo: "Editor de Etiquetas", descricao: "Templates visuais com código de barras Code128 e impressão térmica.", rota: "/etiquetas" },
+  { id: "relatorios", titulo: "Relatórios & DRE Gerencial", descricao: "Consolidação de faturamento, canais de pagamento e DRE.", rota: "/relatorios" },
+  { id: "catalogo", titulo: "Catálogo & Vitrine Digital", descricao: "Link público para clientes finais comprarem com checkout sem senha.", rota: "/catalogo" },
+  { id: "clientes", titulo: "Clientes & Atacado (CRM)", descricao: "Carteira de lojistas e revendedores, limites de crediário.", rota: "/clientes" },
+  { id: "a-ver", titulo: "Contas A Ver & Financeiro", descricao: "Controle de vendas a prazo (fiado), contas e recibos de quitação.", rota: "/a-ver" },
+  { id: "financeiro", titulo: "Gastos & Comprovantes", descricao: "Controle financeiro com foto de comprovantes enviada ao Google Drive.", rota: "/financeiro" },
+  { id: "configuracoes", titulo: "Configurações da Empresa", descricao: "Dados fiscais, personalização de tema, cupom e regras do ERP.", rota: "/configuracoes" }
+];
+
+/**
+ * Obtém as configurações do painel geral (com fallback local e compatibilidade multi-tenant)
+ */
+export function getCompanyPainelConfig(tenantId) {
+  try {
+    const key = `lifesurf_painel_config_${tenantId || "default"}`;
+    let local = localStorage.getItem(key);
+
+    // Fallbacks para compatibilidade cruzada entre lifesurf e lifesurf-principal
+    if (!local && (tenantId === "lifesurf-principal" || tenantId === "lifesurf")) {
+      local = localStorage.getItem("lifesurf_painel_config_lifesurf-principal") ||
+              localStorage.getItem("lifesurf_painel_config_lifesurf");
+    }
+
+    if (!local) {
+      local = localStorage.getItem("lifesurf_painel_config_current");
+    }
+
+    if (local) {
+      const parsed = JSON.parse(local);
+      return { ...DEFAULT_PAINEL_CONFIG, ...parsed };
+    }
+  } catch (err) {
+    console.warn("[tenantService] Erro ao ler painelConfig:", err);
+  }
+  return DEFAULT_PAINEL_CONFIG;
+}
+
+/**
+ * Salva as configurações de formação e módulos do Painel Geral no Firestore e localStorage
+ */
+export async function updateCompanyPainelConfig(tenantId, painelConfig) {
+  if (!painelConfig) return;
+  const merged = { ...DEFAULT_PAINEL_CONFIG, ...painelConfig };
+  const key = `lifesurf_painel_config_${tenantId || "default"}`;
+
+  try {
+    localStorage.setItem(key, JSON.stringify(merged));
+    localStorage.setItem("lifesurf_painel_config_current", JSON.stringify(merged));
+    if (tenantId === "lifesurf-principal" || tenantId === "lifesurf" || !tenantId) {
+      localStorage.setItem("lifesurf_painel_config_lifesurf-principal", JSON.stringify(merged));
+      localStorage.setItem("lifesurf_painel_config_lifesurf", JSON.stringify(merged));
+    }
+  } catch (err) {
+    console.warn("[tenantService] Erro ao salvar painel no localStorage:", err);
+  }
+
+  // Atualiza cache de configurações da empresa para sincronização com TenantContext
+  if (tenantId) {
+    try {
+      const compKey = getCompanyStorageKey(tenantId);
+      const rawComp = localStorage.getItem(compKey);
+      if (rawComp) {
+        const compParsed = JSON.parse(rawComp);
+        compParsed.painelConfig = merged;
+        localStorage.setItem(compKey, JSON.stringify(compParsed));
+      }
+    } catch {}
+  }
+
+  // Notifica o Workspace e a aplicação inteira em tempo real via CustomEvent
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("lifesurf:painel_config_changed", { detail: merged }));
+  }
+
+  // Persiste no Firestore da empresa
+  if (tenantId) {
+    try {
+      const docRef = doc(db, COLLECTIONS.TENANTS, tenantId);
+      await setDoc(docRef, { painelConfig: merged, atualizadoEm: serverTimestamp() }, { merge: true });
+    } catch (err) {
+      console.warn(`[tenantService] Não foi possível salvar painel no Firestore (${tenantId}):`, err);
+    }
+  }
+  return merged;
+}
+
 

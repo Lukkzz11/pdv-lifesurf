@@ -7,7 +7,10 @@ import {
   createPayable,
   markPayableAsPaid,
   generatePaymentReceiptPDF,
-  CATEGORIAS_DESPESA
+  CATEGORIAS_DESPESA,
+  zerarTodasContas,
+  restaurarDemoContas,
+  isContasAVerZerado
 } from "../services/financialService";
 import { openWhatsAppChat, WHATSAPP_TEMPLATES } from "../services/notificationService";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/Card";
@@ -39,7 +42,8 @@ import {
   Receipt,
   Check,
   Sparkles,
-  PieChart
+  PieChart,
+  RotateCcw
 } from "lucide-react";
 
 export default function ContasAVer() {
@@ -49,6 +53,14 @@ export default function ContasAVer() {
   const [receivables, setReceivables] = useState([]);
   const [payables, setPayables] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Modal Zerar Tudo (Contas a Receber / Contas a Pagar)
+  const [modalZerarAberto, setModalZerarAberto] = useState(false);
+  const [salvandoZerar, setSalvandoZerar] = useState(false);
+  const [opcoesZerar, setOpcoesZerar] = useState({
+    receber: true,
+    pagar: true
+  });
 
   // Filtros
   const [buscaReceber, setBuscaReceber] = useState("");
@@ -73,6 +85,27 @@ export default function ContasAVer() {
     valor: "",
     dataVencimento: new Date().toISOString().split("T")[0]
   });
+
+  const handleConfirmarZerarTudo = async () => {
+    setSalvandoZerar(true);
+    try {
+      await zerarTodasContas(activeTenantId, opcoesZerar);
+      if (opcoesZerar.receber) setReceivables([]);
+      if (opcoesZerar.pagar) setPayables([]);
+      setModalZerarAberto(false);
+      toast.success("Contas a Ver e Financeiro zerados com sucesso! Todos os valores agora estão em R$ 0,00.");
+    } catch (err) {
+      toast.error("Erro ao zerar contas: " + (err.message || err));
+    } finally {
+      setSalvandoZerar(false);
+    }
+  };
+
+  const handleRestaurarDemo = async () => {
+    restaurarDemoContas(activeTenantId);
+    toast.success("Demonstração financeira restaurada!");
+    carregarDados();
+  };
 
   const carregarDados = async () => {
     setLoading(true);
@@ -277,6 +310,28 @@ export default function ContasAVer() {
         </div>
 
         <div className="flex items-center gap-2">
+          {isContasAVerZerado(activeTenantId) ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRestaurarDemo}
+              leftIcon={<RotateCcw className="w-3.5 h-3.5 text-sky-400" />}
+              className="text-xs text-sky-400 border-sky-500/30 hover:bg-sky-500/10 cursor-pointer"
+            >
+              Restaurar Demonstração
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setModalZerarAberto(true)}
+              leftIcon={<RotateCcw className="w-3.5 h-3.5 text-rose-400" />}
+              className="text-xs text-rose-400 border-rose-500/30 hover:bg-rose-500/10 cursor-pointer"
+            >
+              Zerar Tudo
+            </Button>
+          )}
+
           {abaAtiva === "pagar" && (
             <Button
               variant="primary"
@@ -374,12 +429,12 @@ export default function ContasAVer() {
               className={cn(
                 "flex items-center gap-2 px-4 py-2.5 rounded-t-xl font-bold text-xs transition-all cursor-pointer border-b-2",
                 isAtiva
-                  ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10"
-                  : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-900/40"
+                  ? "border-emerald-400 bg-emerald-500 !text-white shadow-md font-extrabold"
+                  : "border-transparent text-slate-400 hover:text-white hover:bg-slate-800/60"
               )}
             >
-              <Icon className="w-4 h-4" />
-              <span>{tab.label}</span>
+              <Icon className={cn("w-4 h-4 shrink-0", isAtiva ? "!text-white" : "")} />
+              <span className={cn(isAtiva ? "!text-white font-extrabold" : "")}>{tab.label}</span>
             </button>
           );
         })}
@@ -861,6 +916,76 @@ export default function ContasAVer() {
             </Button>
           </ModalFooter>
         </form>
+      </Modal>
+
+      {/* Modal Zerar Tudo (Contas a Ver / Contas a Pagar) */}
+      <Modal
+        isOpen={modalZerarAberto}
+        onClose={() => setModalZerarAberto(false)}
+        size="md"
+      >
+        <ModalHeader
+          title="Zerar Contas a Ver & Financeiro"
+          description="Limpe todos os saldos e transações para iniciar com dados totalmente zerados (R$ 0,00)."
+          onClose={() => setModalZerarAberto(false)}
+        />
+        <ModalBody className="space-y-4">
+          <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs flex items-start gap-2.5">
+            <AlertTriangle className="w-5 h-5 shrink-0 text-rose-400 mt-0.5" />
+            <div className="space-y-1">
+              <p className="font-bold">Atenção: Ação de Redefinição Financeira</p>
+              <p className="text-slate-300 leading-relaxed">
+                Esta ação definirá o total a receber, contas a pagar, total amortizado e saldo projetado para <strong>R$ 0,00</strong>.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-2.5 pt-1">
+            <label className="text-xs font-semibold text-slate-300 block mb-1">
+              Selecione o que deseja zerar:
+            </label>
+
+            <label className="flex items-center gap-2.5 p-3 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 cursor-pointer hover:border-slate-700">
+              <input
+                type="checkbox"
+                checked={opcoesZerar.receber}
+                onChange={(e) => setOpcoesZerar((prev) => ({ ...prev, receber: e.target.checked }))}
+                className="w-4 h-4 rounded border-slate-700 text-rose-600 focus:ring-rose-500"
+              />
+              <div className="flex-1">
+                <span className="font-bold text-white block">Contas a Receber (Fiado / Títulos de Clientes)</span>
+                <span className="text-[11px] text-slate-400">Zera o saldo devedor e todos os títulos a receber</span>
+              </div>
+            </label>
+
+            <label className="flex items-center gap-2.5 p-3 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 cursor-pointer hover:border-slate-700">
+              <input
+                type="checkbox"
+                checked={opcoesZerar.pagar}
+                onChange={(e) => setOpcoesZerar((prev) => ({ ...prev, pagar: e.target.checked }))}
+                className="w-4 h-4 rounded border-slate-700 text-rose-600 focus:ring-rose-500"
+              />
+              <div className="flex-1">
+                <span className="font-bold text-white block">Contas a Pagar (Despesas & Fornecedores)</span>
+                <span className="text-[11px] text-slate-400">Zera todas as contas a pagar e compromissos operacionais</span>
+              </div>
+            </label>
+          </div>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="ghost" type="button" onClick={() => setModalZerarAberto(false)}>
+            Cancelar
+          </Button>
+          <Button
+            variant="danger"
+            type="button"
+            isLoading={salvandoZerar}
+            onClick={handleConfirmarZerarTudo}
+            className="bg-rose-600 hover:bg-rose-500 text-white font-bold"
+          >
+            Confirmar e Zerar Tudo (R$ 0,00)
+          </Button>
+        </ModalFooter>
       </Modal>
     </div>
   );

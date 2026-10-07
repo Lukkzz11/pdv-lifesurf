@@ -12,9 +12,11 @@ import {
   deletePurchaseInvoice,
   CATEGORIAS_MODA,
   TAMANHOS_LETRAS,
+  TAMANHOS_NUMEROS,
   formatGradeString,
   calculateGradeTotal
 } from "../services/stockService";
+import { executeSaleWithoutStockDeduction } from "../services/saleService";
 import { toggleProductCatalogVisibility } from "../services/catalogService";
 import {
   uploadProductImage,
@@ -64,7 +66,9 @@ import {
   Upload,
   X,
   Loader2,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Zap,
+  DollarSign
 } from "lucide-react";
 
 
@@ -193,6 +197,79 @@ export default function EstoqueLoja() {
       gradeTamanhos: prod.gradeTamanhos || {}
     });
     setModalAberto(true);
+  };
+
+  const [tipoGrade, setTipoGrade] = useState("letras"); // "letras" | "numeros"
+
+  // Estados da Venda sem Baixa de Estoque
+  const [modalVendaSemBaixaAberto, setModalVendaSemBaixaAberto] = useState(false);
+  const [produtoVendaSemBaixa, setProdutoVendaSemBaixa] = useState(null);
+  const [formVendaSemBaixa, setFormVendaSemBaixa] = useState({
+    quantidade: 1,
+    tamanho: "",
+    precoUnitario: "",
+    clienteNome: "Consumidor Final",
+    formaPagamento: "dinheiro",
+    motivo: "Mercadoria física sem inventário imediato"
+  });
+  const [salvandoVendaSemBaixa, setSalvandoVendaSemBaixa] = useState(false);
+
+  const handleAbrirVendaSemBaixa = (prod) => {
+    setProdutoVendaSemBaixa(prod);
+    const tamanhosDisponiveis = prod.gradeTamanhos ? Object.keys(prod.gradeTamanhos) : [];
+    setFormVendaSemBaixa({
+      quantidade: 1,
+      tamanho: tamanhosDisponiveis[0] || "U",
+      precoUnitario: prod.precoVarejo || "",
+      clienteNome: "Consumidor Final",
+      formaPagamento: "dinheiro",
+      motivo: "Mercadoria física sem inventário imediato"
+    });
+    setModalVendaSemBaixaAberto(true);
+  };
+
+  const handleConfirmarVendaSemBaixa = async (e) => {
+    e.preventDefault();
+    if (!produtoVendaSemBaixa) return;
+
+    setSalvandoVendaSemBaixa(true);
+    try {
+      const qtd = Number(formVendaSemBaixa.quantidade) || 1;
+      const unitario = Number(formVendaSemBaixa.precoUnitario) || Number(produtoVendaSemBaixa.precoVarejo) || 0;
+      const total = qtd * unitario;
+
+      const salePayload = {
+        itens: [
+          {
+            id: produtoVendaSemBaixa.id,
+            nome: produtoVendaSemBaixa.nome,
+            referencia: produtoVendaSemBaixa.referencia || "",
+            quantidade: qtd,
+            tamanho: formVendaSemBaixa.tamanho || "U",
+            precoUnitario: unitario,
+            precoVarejo: unitario,
+            total
+          }
+        ],
+        subtotal: total,
+        total,
+        desconto: 0,
+        formaPagamento: formVendaSemBaixa.formaPagamento,
+        tipoVenda: "varejo",
+        cliente: { nome: formVendaSemBaixa.clienteNome || "Consumidor Final" },
+        operador: userProfile?.nome || "Vendedor Balcão",
+        motivoSemBaixa: formVendaSemBaixa.motivo
+      };
+
+      await executeSaleWithoutStockDeduction(activeTenantId, salePayload);
+      toast.success("Venda sem baixa lançada com sucesso no Caixa Loja!");
+      setModalVendaSemBaixaAberto(false);
+    } catch (err) {
+      console.error("[EstoqueLoja] Erro ao registrar venda sem baixa:", err);
+      toast.error("Erro ao registrar venda: " + err.message);
+    } finally {
+      setSalvandoVendaSemBaixa(false);
+    }
   };
 
   const handleToggleCatalogoEstoque = async (prod) => {
@@ -368,16 +445,16 @@ export default function EstoqueLoja() {
               onClick={() => setAbaAtiva(tab.id)}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-t-xl font-bold text-xs transition-all cursor-pointer border-b-2 ${
                 isAtiva
-                  ? "border-sky-500 text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-500/10"
-                  : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-900/40"
+                  ? "border-sky-400 bg-sky-500 !text-white shadow-md font-extrabold"
+                  : "border-transparent text-slate-400 hover:text-white hover:bg-slate-800/60"
               }`}
             >
-              <Icon className="w-4 h-4" />
-              <span>{tab.label}</span>
+              <Icon className={`w-4 h-4 shrink-0 ${isAtiva ? "!text-white" : ""}`} />
+              <span className={isAtiva ? "!text-white font-extrabold" : ""}>{tab.label}</span>
               <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono ${
                 isAtiva
-                  ? "bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-300 font-bold"
-                  : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                  ? "bg-white/25 !text-white font-extrabold shadow-sm"
+                  : "bg-slate-800 text-slate-300"
               }`}>
                 {tab.count}
               </span>
@@ -577,7 +654,17 @@ export default function EstoqueLoja() {
               </TableCell>
 
               <TableCell className="text-right">
-                <div className="flex items-center justify-end gap-1">
+                <div className="flex items-center justify-end gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleAbrirVendaSemBaixa(prod)}
+                    className="border-amber-500/40 text-amber-400 hover:bg-amber-500/10 text-[11px] h-7 px-2 font-semibold"
+                    title="Realizar venda sem debitar estoque (mercadoria física sem baixa)"
+                  >
+                    <Zap className="w-3 h-3 text-amber-400 mr-1" />
+                    Vender s/ Baixa
+                  </Button>
                   <Button
                     variant="ghost"
                     size="iconSm"
@@ -723,20 +810,55 @@ export default function EstoqueLoja() {
               placeholder="Preto, Branco, Azul Royal"
             />
 
-            {/* Seletor Visual de Grade de Tamanhos de Confecção */}
+            {/* Seletor Visual de Grade de Tamanhos de Confecção Dinâmica */}
             <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
                   <Layers className="w-4 h-4 text-sky-400" />
                   Grade de Tamanhos (Estoque Unitário)
+                </span>
+
+                {/* Seletores Dinâmicos de Tipo de Grade */}
+                <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-lg border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setTipoGrade("letras")}
+                    className={`px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer ${
+                      tipoGrade === "letras"
+                        ? "bg-sky-500 text-slate-950 shadow-sm"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    Grade Letras (PP ao G10)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTipoGrade("numeros")}
+                    className={`px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer ${
+                      tipoGrade === "numeros"
+                        ? "bg-sky-500 text-slate-950 shadow-sm"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    Grade Números (36 ao 64)
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                <span>
+                  {tipoGrade === "letras"
+                    ? "Tamanhos de vestuário: Camisas, Camisetas, Polos, Casacos (PP até G10)"
+                    : "Tamanhos numéricos: Bermudas, Shorts e Calças (36 até 64)"}
                 </span>
                 <span className="text-xs text-sky-400 font-bold">
                   Total: {calculateGradeTotal(formData.gradeTamanhos)} peças
                 </span>
               </div>
 
-              <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
-                {TAMANHOS_LETRAS.map((tam) => (
+              {/* Renderização da grade ativa */}
+              <div className="grid grid-cols-4 sm:grid-cols-8 md:grid-cols-10 gap-2 max-h-48 overflow-y-auto p-1">
+                {(tipoGrade === "letras" ? TAMANHOS_LETRAS : TAMANHOS_NUMEROS).map((tam) => (
                   <div key={tam} className="flex flex-col items-center">
                     <label className="text-[11px] font-mono text-slate-400 mb-1">{tam}</label>
                     <input
@@ -884,6 +1006,170 @@ export default function EstoqueLoja() {
             </Button>
             <Button variant="primary" type="submit" isLoading={salvando}>
               Salvar no Estoque
+            </Button>
+          </ModalFooter>
+        </form>
+      </Modal>
+
+      {/* MODAL: REALIZAR VENDA SEM BAIXA IMEDIATA NO ESTOQUE */}
+      <Modal
+        isOpen={modalVendaSemBaixaAberto}
+        onClose={() => setModalVendaSemBaixaAberto(false)}
+        size="md"
+      >
+        <form onSubmit={handleConfirmarVendaSemBaixa}>
+          <ModalHeader
+            title="Venda sem Baixa Imediata no Estoque"
+            description={`Produto: ${produtoVendaSemBaixa?.nome || ""} (Ref: ${produtoVendaSemBaixa?.referencia || "S/Ref"})`}
+            onClose={() => setModalVendaSemBaixaAberto(false)}
+          />
+          <ModalBody className="space-y-4">
+            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex items-start gap-3">
+              <Zap className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-white mb-0.5">
+                  Venda direta sem alterar o saldo do estoque atual
+                </p>
+                <p className="text-amber-200/90 leading-relaxed">
+                  Ideal para peças físicas que acabaram de chegar do fornecedor/fábrica e ainda não foram inventariadas no sistema. A venda e o valor faturado serão lançados normalmente no <strong>Caixa da Loja</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Input
+                label="Quantidade de Peças *"
+                type="number"
+                min="1"
+                required
+                value={formVendaSemBaixa.quantidade}
+                onChange={(e) =>
+                  setFormVendaSemBaixa({
+                    ...formVendaSemBaixa,
+                    quantidade: e.target.value
+                  })
+                }
+              />
+
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1">
+                  Tamanho da Peça Vendida
+                </label>
+                <Select
+                  value={formVendaSemBaixa.tamanho}
+                  onChange={(e) =>
+                    setFormVendaSemBaixa({
+                      ...formVendaSemBaixa,
+                      tamanho: e.target.value
+                    })
+                  }
+                >
+                  {produtoVendaSemBaixa?.gradeTamanhos &&
+                  Object.keys(produtoVendaSemBaixa.gradeTamanhos).length > 0 ? (
+                    Object.keys(produtoVendaSemBaixa.gradeTamanhos).map((tam) => (
+                      <option key={tam} value={tam}>
+                        Tamanho {tam}
+                      </option>
+                    ))
+                  ) : (
+                    <>
+                      <option value="U">Tamanho Único (U)</option>
+                      <option value="M">Tamanho M</option>
+                      <option value="G">Tamanho G</option>
+                    </>
+                  )}
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Input
+                label="Preço Unitário da Venda (R$) *"
+                type="number"
+                step="0.01"
+                min="0.01"
+                required
+                value={formVendaSemBaixa.precoUnitario}
+                onChange={(e) =>
+                  setFormVendaSemBaixa({
+                    ...formVendaSemBaixa,
+                    precoUnitario: e.target.value
+                  })
+                }
+              />
+
+              <Select
+                label="Forma de Pagamento *"
+                value={formVendaSemBaixa.formaPagamento}
+                onChange={(e) =>
+                  setFormVendaSemBaixa({
+                    ...formVendaSemBaixa,
+                    formaPagamento: e.target.value
+                  })
+                }
+              >
+                <option value="dinheiro">Dinheiro</option>
+                <option value="pix">PIX</option>
+                <option value="cartao_debito">Cartão de Débito</option>
+                <option value="cartao_credito">Cartão de Crédito</option>
+                <option value="prazo">A Prazo (A Ver / Fiado)</option>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Input
+                label="Nome do Cliente"
+                placeholder="Consumidor Final"
+                value={formVendaSemBaixa.clienteNome}
+                onChange={(e) =>
+                  setFormVendaSemBaixa({
+                    ...formVendaSemBaixa,
+                    clienteNome: e.target.value
+                  })
+                }
+              />
+
+              <Input
+                label="Motivo / Justificativa"
+                value={formVendaSemBaixa.motivo}
+                onChange={(e) =>
+                  setFormVendaSemBaixa({
+                    ...formVendaSemBaixa,
+                    motivo: e.target.value
+                  })
+                }
+              />
+            </div>
+
+            {/* Totalizador da Venda */}
+            <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between">
+              <span className="text-xs text-slate-400 font-medium">Total da Venda a Lançar:</span>
+              <span className="text-base font-extrabold text-emerald-400 font-mono">
+                {formatCurrency(
+                  (Number(formVendaSemBaixa.quantidade) || 1) *
+                    (Number(formVendaSemBaixa.precoUnitario) ||
+                      Number(produtoVendaSemBaixa?.precoVarejo) ||
+                      0)
+                )}
+              </span>
+            </div>
+          </ModalBody>
+          <ModalFooter>
+            <Button
+              variant="ghost"
+              type="button"
+              onClick={() => setModalVendaSemBaixaAberto(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="primary"
+              type="submit"
+              isLoading={salvandoVendaSemBaixa}
+              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold"
+              leftIcon={<Zap className="w-4 h-4 text-slate-950" />}
+            >
+              Confirmar Venda sem Baixa
             </Button>
           </ModalFooter>
         </form>

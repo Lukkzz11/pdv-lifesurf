@@ -16,6 +16,7 @@ import {
   getGoogleClientId,
   requestGoogleAccessToken,
   uploadReceiptImageToDrive,
+  uploadPisoLojaReceiptToDrive,
   ensureMonthlyReceiptsDriveFolder,
   MESES_NOMES
 } from "../services/googleApiService";
@@ -68,7 +69,7 @@ import {
   Building2
 } from "lucide-react";
 
-export const CATEGORIAS_GASTO_PESSOAL = [
+const CATEGORIAS_GASTO_PESSOAL = [
   "Alimentação & Supermercado",
   "Moradia & Aluguel / Condomínio",
   "Energia, Água & Internet",
@@ -82,7 +83,7 @@ export const CATEGORIAS_GASTO_PESSOAL = [
   "Outros Gastos Pessoais"
 ];
 
-export const CATEGORIAS_ENTRADA_PESSOAL = [
+const CATEGORIAS_ENTRADA_PESSOAL = [
   "Salário / Pró-Labore",
   "Recebimento de Terceiros / Amigos",
   "Aluguel / Renda Passiva",
@@ -150,6 +151,107 @@ export default function FinanceiroGastos() {
   // Modal de Visualização de Comprovante
   const [modalPreviewComprovante, setModalPreviewComprovante] = useState(null);
 
+  // Estados para "Enviar Comprovante Piso Loja (Prefeitura)"
+  const [modalPisoLojaAberto, setModalPisoLojaAberto] = useState(false);
+  const [enviandoPisoLoja, setEnviandoPisoLoja] = useState(false);
+  const [formPisoLoja, setFormPisoLoja] = useState({
+    nomeDoPonto: "",
+    data: new Date().toISOString().split("T")[0],
+    valor: "",
+    pastaDrive: "LifeSurf - Comprovantes Piso Loja (Prefeitura)",
+    observacoes: ""
+  });
+  const [pisoLojaArquivo, setPisoLojaArquivo] = useState(null);
+  const [pisoLojaArquivoNome, setPisoLojaArquivoNome] = useState("");
+  const [pisoLojaPreview, setPisoLojaPreview] = useState(null);
+  const fileInputPisoRef = useRef(null);
+
+  const handleSelecionarArquivoPiso = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setPisoLojaArquivo(file);
+    setPisoLojaArquivoNome(file.name);
+    if (file.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onload = (ev) => setPisoLojaPreview(ev.target.result);
+      reader.readAsDataURL(file);
+    } else {
+      setPisoLojaPreview(null);
+    }
+  };
+
+  const handleEnviarComprovantePisoLoja = async (e) => {
+    e.preventDefault();
+    if (!formPisoLoja.nomeDoPonto.trim()) {
+      toast.error("Informe a descrição / nome do ponto.");
+      return;
+    }
+    if (!pisoLojaArquivo) {
+      toast.error("Selecione o arquivo de comprovante (imagem ou PDF).");
+      return;
+    }
+
+    if (!googleConectado) {
+      toast("Conecte sua conta Google para enviar direto para a pasta do Drive.", { icon: "🔐" });
+      setModalGoogleAberto(true);
+      return;
+    }
+
+    setEnviandoPisoLoja(true);
+    try {
+      // 1. Upload direto para o Google Drive na pasta indicada
+      const driveResult = await uploadPisoLojaReceiptToDrive({
+        fileBlob: pisoLojaArquivo,
+        fileName: pisoLojaArquivoNome,
+        nomeDoPonto: formPisoLoja.nomeDoPonto,
+        dataPagamento: formPisoLoja.data,
+        valor: formPisoLoja.valor,
+        folderName: formPisoLoja.pastaDrive || "LifeSurf - Comprovantes Piso Loja (Prefeitura)",
+        description: `Comprovante Piso Loja - Ponto: ${formPisoLoja.nomeDoPonto} - ${formPisoLoja.observacoes || ""}`
+      });
+
+      // 2. Registra o gasto correspondente no fluxo de caixa
+      if (formPisoLoja.valor && Number(formPisoLoja.valor) > 0) {
+        await saveCashFlowTransaction(tenantId, {
+          tipo: "saida",
+          descricao: `Piso Loja Prefeitura - ${formPisoLoja.nomeDoPonto}`,
+          fornecedorOuCliente: "Prefeitura Municipal",
+          responsavel: userProfile?.nome || "Administrador",
+          categoria: "Impostos, Taxas & Alvarás",
+          valor: Number(formPisoLoja.valor),
+          data: formPisoLoja.data,
+          formaPagamento: "pix",
+          status: "concluido",
+          observacoes: `Comprovante salvo no Drive (${driveResult.folderName}): ${driveResult.webViewLink || ""}`,
+          comprovanteDriveUrl: driveResult.webViewLink || "",
+          comprovanteDriveName: driveResult.fileName || ""
+        });
+        await carregarDadosFinanceiros();
+      }
+
+      toast.success(
+        `Comprovante do ponto "${formPisoLoja.nomeDoPonto}" salvo no Google Drive com sucesso!`
+      );
+      setModalPisoLojaAberto(false);
+      setFormPisoLoja({
+        nomeDoPonto: "",
+        data: new Date().toISOString().split("T")[0],
+        valor: "",
+        pastaDrive: "LifeSurf - Comprovantes Piso Loja (Prefeitura)",
+        observacoes: ""
+      });
+      setPisoLojaArquivo(null);
+      setPisoLojaArquivoNome("");
+      setPisoLojaPreview(null);
+    } catch (err) {
+      console.error("[FinanceiroGastos] Erro ao enviar comprovante piso loja:", err);
+      toast.error("Erro ao enviar comprovante: " + err.message);
+    } finally {
+      setEnviandoPisoLoja(false);
+    }
+  };
+
   // 1. CARREGAMENTO DAS TRANSAÇÕES E PASTA DO DRIVE
   const carregarDadosFinanceiros = async () => {
     setLoading(true);
@@ -165,7 +267,11 @@ export default function FinanceiroGastos() {
           month: parseInt(mesStr, 10)
         })
           .then((folder) => setPastaMesInfo(folder))
-          .catch((err) => console.warn("Erro ao obter pasta do mês:", err));
+          .catch((err) => {
+            console.warn("Google Drive não sincronizado ou sessão expirada:", err?.message || err);
+            setPastaMesInfo(null);
+            setGoogleConectado(false);
+          });
       }
     } catch (err) {
       console.error("Erro ao carregar transações financeiras:", err);
@@ -569,6 +675,18 @@ export default function FinanceiroGastos() {
             className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10"
           >
             + Nova Entrada
+          </Button>
+
+          {/* Botão Enviar Comprovante Piso Loja (Prefeitura) */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setModalPisoLojaAberto(true)}
+            leftIcon={<Building2 className="w-4 h-4 text-amber-400" />}
+            className="border-amber-500/30 text-amber-300 hover:bg-amber-500/10"
+            title="Enviar Comprovante Piso Loja da Prefeitura diretamente para o Google Drive"
+          >
+            Comprovante Piso Loja
           </Button>
 
           {/* Botão Novo Gasto */}
@@ -1266,6 +1384,165 @@ export default function FinanceiroGastos() {
           </ModalFooter>
         </Modal>
       )}
+
+      {/* 8. MODAL DE COMPROVANTE PISO LOJA (PREFEITURA -> GOOGLE DRIVE) */}
+      <Modal isOpen={modalPisoLojaAberto} onClose={() => setModalPisoLojaAberto(false)} size="lg">
+        <ModalHeader onClose={() => setModalPisoLojaAberto(false)}>
+          <div className="flex items-center gap-2">
+            <Building2 className="w-5 h-5 text-amber-400" />
+            <span>Enviar Comprovante Piso Loja (Prefeitura)</span>
+          </div>
+        </ModalHeader>
+        <form onSubmit={handleEnviarComprovantePisoLoja}>
+          <ModalBody className="space-y-4">
+            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-200">
+              <p className="font-semibold mb-1">Destinado ao pagamento de taxa municipal / alvará de piso de loja.</p>
+              <p className="text-amber-300/80">
+                O arquivo é transferido com autenticação segura diretamente para a pasta do Google Drive indicada, ficando disponível para conferência contábil e auditoria.
+              </p>
+            </div>
+
+            {/* Nome do Ponto / Descrição */}
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1">
+                Descrição / Nome do Ponto *
+              </label>
+              <Input
+                placeholder="Ex: Ponto 01 - Centro / Quiosque Orla / Loja Matriz"
+                value={formPisoLoja.nomeDoPonto}
+                onChange={(e) => setFormPisoLoja({ ...formPisoLoja, nomeDoPonto: e.target.value })}
+                required
+              />
+            </div>
+
+            {/* Data e Valor */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">
+                  Data do Pagamento *
+                </label>
+                <Input
+                  type="date"
+                  value={formPisoLoja.data}
+                  onChange={(e) => setFormPisoLoja({ ...formPisoLoja, data: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">
+                  Valor Pago (R$)
+                </label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  placeholder="0,00"
+                  value={formPisoLoja.valor}
+                  onChange={(e) => setFormPisoLoja({ ...formPisoLoja, valor: e.target.value })}
+                />
+                <span className="text-[10px] text-slate-500">Se preenchido, lançará automaticamente como despesa no fluxo.</span>
+              </div>
+            </div>
+
+            {/* Pasta do Google Drive de Destino */}
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1">
+                Pasta de Destino no Google Drive
+              </label>
+              <div className="relative">
+                <Folder className="w-4 h-4 text-amber-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Input
+                  className="pl-9"
+                  placeholder="LifeSurf - Comprovantes Piso Loja (Prefeitura)"
+                  value={formPisoLoja.pastaDrive}
+                  onChange={(e) => setFormPisoLoja({ ...formPisoLoja, pastaDrive: e.target.value })}
+                />
+              </div>
+            </div>
+
+            {/* Upload do Arquivo */}
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1">
+                Arquivo do Comprovante (Imagem ou PDF) *
+              </label>
+              <input
+                type="file"
+                ref={fileInputPisoRef}
+                onChange={handleSelecionarArquivoPiso}
+                accept="image/*,application/pdf"
+                className="hidden"
+              />
+              <div
+                onClick={() => fileInputPisoRef.current?.click()}
+                className="border-2 border-dashed border-slate-700 hover:border-amber-500/50 rounded-xl p-4 text-center cursor-pointer transition-all bg-slate-900/40 hover:bg-slate-900/70"
+              >
+                {pisoLojaArquivoNome ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+                    <span className="text-xs font-bold text-white">{pisoLojaArquivoNome}</span>
+                    <span className="text-[11px] text-slate-400">Clique para substituir arquivo</span>
+                    {pisoLojaPreview && (
+                      <img
+                        src={pisoLojaPreview}
+                        alt="Preview"
+                        className="mt-2 max-h-36 rounded-lg object-contain border border-slate-800"
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-2">
+                    <Upload className="w-8 h-8 text-slate-400" />
+                    <span className="text-xs font-medium text-slate-300">Clique para selecionar comprovante</span>
+                    <span className="text-[11px] text-slate-500">Suporta JPG, PNG e PDF</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Status Google Drive */}
+            <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Cloud className={cn("w-4 h-4", googleConectado ? "text-emerald-400" : "text-amber-400")} />
+                <span className="text-xs text-slate-300">
+                  {googleConectado
+                    ? `Conectado como: ${googleUser?.email || "Google Drive Ativo"}`
+                    : "Google Drive não conectado"}
+                </span>
+              </div>
+              {!googleConectado && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setModalGoogleAberto(true)}
+                  className="text-xs text-amber-300 border-amber-500/30"
+                >
+                  Conectar Agora
+                </Button>
+              )}
+            </div>
+          </ModalBody>
+          <ModalFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setModalPisoLojaAberto(false)}
+              disabled={enviandoPisoLoja}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={enviandoPisoLoja || !pisoLojaArquivo || !formPisoLoja.nomeDoPonto.trim()}
+              leftIcon={<Upload className="w-4 h-4" />}
+              className="bg-amber-600 hover:bg-amber-500 text-white font-bold"
+            >
+              {enviandoPisoLoja ? "Enviando ao Drive..." : "Enviar Comprovante"}
+            </Button>
+          </ModalFooter>
+        </form>
+      </Modal>
 
       {/* Modal Dedicado para Conectar Google / Escolher E-mail */}
       <GoogleConnectModal

@@ -27,8 +27,15 @@ import { getProductImageUrl } from "./imageUploadService";
  * SERVIÇO DE ESTOQUE DUAL (LOJA vs FÁBRICA) PARA CONFECÇÃO & MODA
  */
 
-export const TAMANHOS_LETRAS = ["PP", "P", "M", "G", "GG", "EXG", "G1", "G2", "G3", "G4"];
-export const TAMANHOS_NUMEROS = ["36", "38", "40", "42", "44", "46", "48", "50", "52", "54"];
+export const TAMANHOS_LETRAS = [
+  "PP", "P", "M", "G", "GG", "XG",
+  "G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9", "G10"
+];
+
+export const TAMANHOS_NUMEROS = [
+  "36", "38", "40", "42", "44", "46", "48", "50",
+  "52", "54", "56", "58", "60", "62", "64"
+];
 
 export const CATEGORIAS_MODA = [
   "Camisa",

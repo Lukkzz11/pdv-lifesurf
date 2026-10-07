@@ -155,9 +155,74 @@ export const DEMO_PAYABLES = [
 ];
 
 /**
+ * Verifica se as contas a receber e pagar foram zeradas pelo usuário
+ */
+export function isContasAVerZerado(tenantId) {
+  try {
+    return localStorage.getItem(`lifesurf_contas_aver_zerado_${tenantId || "default"}`) === "true";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Zera todas as contas a receber e pagar da empresa ativa (R$ 0,00)
+ */
+export async function zerarTodasContas(tenantId, options = { receber: true, pagar: true }) {
+  try {
+    localStorage.setItem(`lifesurf_contas_aver_zerado_${tenantId || "default"}`, "true");
+
+    if (tenantId) {
+      const promises = [];
+      if (options.receber) {
+        try {
+          const colRec = collection(db, "empresas", tenantId, "contas_receber");
+          const snapRec = await getDocs(colRec);
+          snapRec.docs.forEach((d) => promises.push(deleteDoc(d.ref)));
+        } catch (e) {
+          console.warn("[financialService] Erro ao limpar contas_receber do Firestore:", e);
+        }
+      }
+
+      if (options.pagar) {
+        try {
+          const colPay = collection(db, "empresas", tenantId, "contas_pagar");
+          const snapPay = await getDocs(colPay);
+          snapPay.docs.forEach((d) => promises.push(deleteDoc(d.ref)));
+        } catch (e) {
+          console.warn("[financialService] Erro ao limpar contas_pagar do Firestore:", e);
+        }
+      }
+
+      await Promise.all(promises);
+    }
+
+    return true;
+  } catch (err) {
+    console.error("[financialService] Erro ao zerar contas:", err);
+    throw err;
+  }
+}
+
+/**
+ * Restaura dados demonstrativos de contas a receber e pagar
+ */
+export function restaurarDemoContas(tenantId) {
+  try {
+    localStorage.removeItem(`lifesurf_contas_aver_zerado_${tenantId || "default"}`);
+  } catch (err) {
+    console.warn("[financialService] Erro ao restaurar contas:", err);
+  }
+}
+
+/**
  * Busca títulos de Contas a Receber ("A Ver" / Fiado)
  */
 export async function fetchReceivables(tenantId) {
+  if (isContasAVerZerado(tenantId)) {
+    return [];
+  }
+
   if (!tenantId) return DEMO_RECEIVABLES;
 
   try {
@@ -166,16 +231,13 @@ export async function fetchReceivables(tenantId) {
     const snap = await getDocs(q);
 
     if (!snap.empty) {
-      const dbDocs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const dbIds = new Set(dbDocs.map((d) => d.numeroDocumento || d.id));
-      const demoRestante = DEMO_RECEIVABLES.filter((d) => !dbIds.has(d.numeroDocumento));
-      return [...dbDocs, ...demoRestante];
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     }
   } catch (err) {
     console.warn("[financialService] Usando demo receivables:", err.message);
   }
 
-  return DEMO_RECEIVABLES;
+  return isContasAVerZerado(tenantId) ? [] : DEMO_RECEIVABLES;
 }
 
 /**
@@ -235,6 +297,10 @@ export async function registerReceivablePayment(tenantId, receivable, paymentDat
  * Busca despesas e Contas a Pagar
  */
 export async function fetchPayables(tenantId) {
+  if (isContasAVerZerado(tenantId)) {
+    return [];
+  }
+
   if (!tenantId) return DEMO_PAYABLES;
 
   try {
@@ -243,16 +309,13 @@ export async function fetchPayables(tenantId) {
     const snap = await getDocs(q);
 
     if (!snap.empty) {
-      const dbDocs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const dbIds = new Set(dbDocs.map((d) => d.id));
-      const demoRestante = DEMO_PAYABLES.filter((d) => !dbIds.has(d.id));
-      return [...dbDocs, ...demoRestante];
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     }
   } catch (err) {
     console.warn("[financialService] Usando demo payables:", err.message);
   }
 
-  return DEMO_PAYABLES;
+  return isContasAVerZerado(tenantId) ? [] : DEMO_PAYABLES;
 }
 
 /**
