@@ -21,6 +21,7 @@ import {
   cacheProductCatalog,
   getCachedProductCatalog
 } from "./pdvOfflineService";
+import { getProductImageUrl } from "./imageUploadService";
 
 /**
  * SERVIÇO DE ESTOQUE DUAL (LOJA vs FÁBRICA) PARA CONFECÇÃO & MODA
@@ -141,25 +142,38 @@ export async function saveProduct(tenantId, tipoEstoque, productData, productId 
   const stockCol = collection(db, "empresas", tenantId, collectionName);
 
   const gradeTotal = calculateGradeTotal(productData.gradeTamanhos);
+  const fotoNormalizada = getProductImageUrl(productData);
   const payload = {
     ...productData,
     tipoEstoque,
+    fotoUrl: fotoNormalizada,
+    imageUrl: fotoNormalizada,
+    imagem: fotoNormalizada,
     estoqueTotal: gradeTotal || Number(productData.estoqueTotal) || 0,
     empresaId: tenantId,
     atualizadoEm: serverTimestamp()
   };
 
+  let savedId = productId;
   if (productId) {
     const docRef = doc(stockCol, productId);
     await updateDoc(docRef, payload);
-    return productId;
   } else {
     payload.criadoEm = serverTimestamp();
     const docRef = await addDoc(stockCol, payload);
+    savedId = docRef.id;
     // Atualiza contador de agregados desnormalizados
     await updateStockAggregateCount(tenantId, tipoEstoque, payload.estoqueTotal);
-    return docRef.id;
   }
+
+  // Notifica o Catálogo Online para atualizar fotos e dados em tempo real
+  try {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("lifesurf:catalog_updated", { detail: { tenantId, productId: savedId } }));
+    }
+  } catch {}
+
+  return savedId;
 }
 
 /**

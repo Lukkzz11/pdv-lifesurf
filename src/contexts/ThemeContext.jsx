@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 import { STORAGE_KEYS } from "../config/constants";
-import { updateCompanyTheme } from "../services/tenantService";
+import { updateCompanyTheme, fetchCompanyDetails } from "../services/tenantService";
 
 export const THEME_PRESETS = [
   {
@@ -16,9 +16,33 @@ export const THEME_PRESETS = [
     badgeColor: "sky"
   },
   {
+    id: "sunset-orange",
+    nome: "Sunset Laranja & Surf",
+    descricao: "Paleta quente, esportiva e vibrante inspirada nas cores do entardecer e moda praia.",
+    mode: "dark",
+    primaryColor: "#f97316", // orange-500
+    accentColor: "#fb923c",  // orange-400
+    bgMain: "#140d0a",
+    bgCard: "rgba(30, 20, 16, 0.85)",
+    badgeText: "Surfwear",
+    badgeColor: "warning"
+  },
+  {
+    id: "emerald-pro",
+    nome: "Esmeralda ERP & Vendas",
+    descricao: "Verde esmeralda sofisticado focado em finanças, vendas e alta rentabilidade.",
+    mode: "dark",
+    primaryColor: "#10b981", // emerald-500
+    accentColor: "#34d399",  // emerald-400
+    bgMain: "#04130e",
+    bgCard: "rgba(6, 28, 20, 0.85)",
+    badgeText: "Finanças",
+    badgeColor: "success"
+  },
+  {
     id: "dark-stealth",
     nome: "Preto Absoluto (AMOLED)",
-    descricao: "Preto puro e alto contraste para uso contínuo e economia de energia.",
+    descricao: "Preto puro e alto contraste para uso contínuo, focado em agilidade no PDV.",
     mode: "dark",
     primaryColor: "#6366f1", // indigo-500
     accentColor: "#a855f7",  // purple-500
@@ -34,34 +58,10 @@ export const THEME_PRESETS = [
     mode: "light",
     primaryColor: "#0284c7",
     accentColor: "#0369a1",
-    bgMain: "#f1f5f9",
+    bgMain: "#f8fafc",
     bgCard: "#ffffff",
     badgeText: "Clean Light",
     badgeColor: "neutral"
-  },
-  {
-    id: "emerald-pro",
-    nome: "Esmeralda ERP & Vendas",
-    descricao: "Verde esmeralda sofisticado focado em finanças, vendas e rentabilidade.",
-    mode: "dark",
-    primaryColor: "#10b981", // emerald-500
-    accentColor: "#34d399",  // emerald-400
-    bgMain: "#04130e",
-    bgCard: "rgba(6, 28, 20, 0.85)",
-    badgeText: "Finanças",
-    badgeColor: "success"
-  },
-  {
-    id: "sunset-orange",
-    nome: "Sunset Laranja & Surf",
-    descricao: "Paleta quente e vibrante inspirada nas cores do entardecer no mar.",
-    mode: "dark",
-    primaryColor: "#f97316", // orange-500
-    accentColor: "#fb923c",  // orange-400
-    bgMain: "#140d0a",
-    bgCard: "rgba(30, 20, 16, 0.85)",
-    badgeText: "Surfwear",
-    badgeColor: "warning"
   },
   {
     id: "custom",
@@ -142,11 +142,17 @@ export function ThemeProvider({ children, activeTenantId = null }) {
     const preset = THEME_PRESETS.find((p) => p.id === config.id);
     const primary = config.primaryColor || preset?.primaryColor || "#0284c7";
     const accent = config.accentColor || preset?.accentColor || "#38bdf8";
+    const rgbStr = hexToRgb(primary);
+    const accentRgbStr = hexToRgb(accent);
 
     root.style.setProperty("--brand-primary", primary);
     root.style.setProperty("--brand-accent", accent);
-    root.style.setProperty("--brand-primary-rgb", hexToRgb(primary));
-    root.style.setProperty("--brand-accent-rgb", hexToRgb(accent));
+    root.style.setProperty("--brand-primary-rgb", rgbStr);
+    root.style.setProperty("--brand-accent-rgb", accentRgbStr);
+    root.style.setProperty("--brand-primary-hover", accent);
+    root.style.setProperty("--brand-glow", `rgba(${rgbStr}, 0.25)`);
+    root.style.setProperty("--brand-subtle", `rgba(${rgbStr}, 0.12)`);
+    root.style.setProperty("--brand-border", `rgba(${rgbStr}, 0.35)`);
 
     if (isLight) {
       root.style.setProperty("--bg-main", "#f8fafc");
@@ -181,6 +187,53 @@ export function ThemeProvider({ children, activeTenantId = null }) {
     applyThemeToDOM(themeConfig);
   }, [themeConfig, applyThemeToDOM]);
 
+  // Efeito para sincronizar tema a partir do Firestore ao carregar/trocar empresa
+  useEffect(() => {
+    if (!activeTenantId) return;
+
+    let isMounted = true;
+    async function sincronizarTemaEmpresa() {
+      try {
+        const details = await fetchCompanyDetails(activeTenantId);
+        if (isMounted && details?.temaConfig) {
+          const cfg = details.temaConfig;
+          setThemeConfig((prev) => {
+            if (
+              prev.id === cfg.id &&
+              prev.primaryColor === cfg.primaryColor &&
+              prev.accentColor === cfg.accentColor &&
+              prev.mode === cfg.mode
+            ) {
+              return prev;
+            }
+            return cfg;
+          });
+          applyThemeToDOM(cfg);
+          try {
+            localStorage.setItem(STORAGE_KEYS.THEME, JSON.stringify(cfg));
+          } catch {}
+        }
+      } catch (err) {
+        console.warn("[ThemeContext] Erro ao carregar tema da empresa:", err);
+      }
+    }
+
+    sincronizarTemaEmpresa();
+
+    const handleThemeEvent = (e) => {
+      if (e?.detail) {
+        setThemeConfig(e.detail);
+        applyThemeToDOM(e.detail);
+      }
+    };
+
+    window.addEventListener("lifesurf:tenant_theme_changed", handleThemeEvent);
+    return () => {
+      isMounted = false;
+      window.removeEventListener("lifesurf:tenant_theme_changed", handleThemeEvent);
+    };
+  }, [activeTenantId, applyThemeToDOM]);
+
   /**
    * Altera o tema ativo e persiste no LocalStorage e no Firestore
    */
@@ -209,6 +262,11 @@ export function ThemeProvider({ children, activeTenantId = null }) {
     } catch {
       // Ignora erro
     }
+
+    // Notifica outros listeners na mesma janela
+    try {
+      window.dispatchEvent(new CustomEvent("lifesurf:tenant_theme_changed", { detail: completeConfig }));
+    } catch {}
 
     // Salva no Firestore se houver empresa ativa
     if (persistToFirestore && activeTenantId) {

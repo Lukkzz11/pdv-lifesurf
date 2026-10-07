@@ -7,6 +7,7 @@ import {
   fetchCompanyPublicInfo,
   submitPublicOrder
 } from "../services/catalogService";
+import { getProductImageUrl, DEFAULT_PRODUCT_FALLBACK } from "../services/imageUploadService";
 import { Button } from "../components/ui/Button";
 import { Modal, ModalHeader, ModalBody, ModalFooter } from "../components/ui/Modal";
 import { formatCurrency } from "../utils/formatters";
@@ -120,7 +121,25 @@ export default function CatalogoPublico() {
       }
     }
     carregarDados();
+
+    // Sincronização em tempo real quando o catálogo for editado no painel administrativo
+    const handleCatalogUpdate = () => {
+      fetchPublicCatalog(tenantId).then((prods) => {
+        if (Array.isArray(prods) && prods.length > 0) {
+          setProdutos(prods);
+        }
+      });
+    };
+
+    window.addEventListener("lifesurf:catalog_updated", handleCatalogUpdate);
+    window.addEventListener("storage", handleCatalogUpdate);
+
+    return () => {
+      window.removeEventListener("lifesurf:catalog_updated", handleCatalogUpdate);
+      window.removeEventListener("storage", handleCatalogUpdate);
+    };
   }, [tenantId]);
+
 
   // 2. EXTRAÇÃO E FILTRO DE CATEGORIAS
   const categorias = useMemo(() => {
@@ -188,7 +207,7 @@ export default function CatalogoPublico() {
           id: produtoModal.id,
           nome: produtoModal.nome,
           referencia: produtoModal.referencia || "",
-          fotoUrl: produtoModal.fotoUrl || null,
+          fotoUrl: getProductImageUrl(produtoModal) || null,
           tamanho: tamanhoSelecionado,
           cor: corSelecionada,
           tipoVenda: tipoTabela,
@@ -628,19 +647,22 @@ export default function CatalogoPublico() {
                 >
                   {/* Foto do Produto (Proporção Editorial 3:4 com Zoom Suave) */}
                   <div className="relative aspect-[3/4] w-full bg-neutral-100 overflow-hidden cursor-pointer" onClick={() => abrirSeletorVariacao(produto)}>
-                    {produto.fotoUrl ? (
-                      <img
-                        src={produto.fotoUrl}
-                        alt={produto.nome}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center bg-neutral-100 text-neutral-400 p-4 text-center">
-                        <Tag className="w-10 h-10 mb-1 opacity-30 text-neutral-500" />
-                        <span className="text-[10px] font-bold text-neutral-400 tracking-wider">LIFESURF</span>
-                      </div>
-                    )}
+                    {(() => {
+                      const fotoUrl = getProductImageUrl(produto);
+                      return (
+                        <img
+                          src={fotoUrl || DEFAULT_PRODUCT_FALLBACK}
+                          alt={produto.nome}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out"
+                          loading="lazy"
+                          onError={(e) => {
+                            e.currentTarget.onerror = null;
+                            e.currentTarget.src = DEFAULT_PRODUCT_FALLBACK;
+                          }}
+                        />
+                      );
+                    })()}
+
 
                     {/* Badges Minimalistas */}
                     <div className="absolute top-2.5 left-2.5 flex flex-col gap-1 z-10">
@@ -764,14 +786,22 @@ export default function CatalogoPublico() {
           />
           <ModalBody className="space-y-4 text-neutral-900 bg-white">
             <div className="flex items-center gap-3 p-3 bg-neutral-50 rounded-xl border border-neutral-200">
-              {produtoModal.fotoUrl && (
-                <img
-                  src={produtoModal.fotoUrl}
-                  alt={produtoModal.nome}
-                  className="w-16 h-20 rounded-lg object-cover border border-neutral-200"
-                />
-              )}
-              <div className="flex-1">
+              {(() => {
+                const modalFoto = getProductImageUrl(produtoModal);
+                return modalFoto ? (
+                  <img
+                    src={modalFoto}
+                    alt={produtoModal.nome}
+                    className="w-16 h-20 rounded-lg object-cover border border-neutral-200 shrink-0"
+                    onError={(e) => {
+                      e.currentTarget.onerror = null;
+                      e.currentTarget.src = DEFAULT_PRODUCT_FALLBACK;
+                    }}
+                  />
+                ) : null;
+              })()}
+              <div className="flex-1 min-w-0">
+
                 <span className="text-xs text-neutral-500 block uppercase tracking-wider">{produtoModal.categoria}</span>
                 <div className="flex items-baseline gap-2 mt-0.5">
                   <strong className="text-xl font-bold text-neutral-900 font-sans">
@@ -954,6 +984,18 @@ export default function CatalogoPublico() {
                         key={item.key}
                         className="p-3 bg-neutral-50 rounded-xl border border-neutral-200 flex items-center justify-between gap-3"
                       >
+                        {item.fotoUrl && (
+                          <div className="w-12 h-14 rounded-lg bg-neutral-200 border border-neutral-300 overflow-hidden shrink-0">
+                            <img
+                              src={item.fotoUrl}
+                              alt={item.nome}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                e.currentTarget.style.display = "none";
+                              }}
+                            />
+                          </div>
+                        )}
                         <div className="flex-1 min-w-0">
                           <h4 className="text-xs font-semibold text-neutral-900 truncate">{item.nome}</h4>
                           <div className="flex items-center gap-2 text-[11px] text-neutral-500 mt-0.5 font-mono">
@@ -971,6 +1013,7 @@ export default function CatalogoPublico() {
                             {formatCurrency(item.precoUnitario * item.quantidade)}
                           </strong>
                         </div>
+
 
                         {/* Botões de Quantidade */}
                         <div className="flex items-center gap-1.5 bg-white p-1 rounded-lg border border-neutral-200">

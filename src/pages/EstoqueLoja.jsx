@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../security/AuthContext";
 import { useTenant } from "../contexts/TenantContext";
@@ -16,6 +16,11 @@ import {
   calculateGradeTotal
 } from "../services/stockService";
 import { toggleProductCatalogVisibility } from "../services/catalogService";
+import {
+  uploadProductImage,
+  getProductImageUrl,
+  DEFAULT_PRODUCT_FALLBACK
+} from "../services/imageUploadService";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
@@ -54,8 +59,14 @@ import {
   Globe,
   Eye,
   EyeOff,
-  Star
+  Star,
+  Camera,
+  Upload,
+  X,
+  Loader2,
+  Image as ImageIcon
 } from "lucide-react";
+
 
 export default function EstoqueLoja() {
   const navigate = useNavigate();
@@ -94,6 +105,36 @@ export default function EstoqueLoja() {
     descricao: "",
     gradeTamanhos: { P: 5, M: 10, G: 8, GG: 4 }
   });
+
+  const [uploadingFoto, setUploadingFoto] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const handleUploadFotoEstoque = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("Selecione um arquivo de imagem válido (JPG, PNG ou WEBP).");
+      return;
+    }
+
+    setUploadingFoto(true);
+    const toastId = toast.loading("Otimizando e preparando foto...");
+    try {
+      const nomeBase = (formData.referencia || formData.nome || "produto")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "-");
+      const res = await uploadProductImage(activeTenantId, file, `${nomeBase}.jpg`);
+      setFormData((prev) => ({ ...prev, fotoUrl: res.url }));
+      toast.success("Foto carregada com sucesso!", { id: toastId });
+    } catch (err) {
+      toast.error("Erro ao carregar foto: " + (err.message || "Tente novamente"), { id: toastId });
+    } finally {
+      setUploadingFoto(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
 
   const carregarDadosEstoque = async () => {
     if (!activeTenantId) return;
@@ -245,6 +286,15 @@ export default function EstoqueLoja() {
     return matchBusca && matchCat;
   });
 
+  // Métricas do Painel ERP de Estoque
+  const totalPecas = produtos.reduce((acc, p) => acc + (calculateGradeTotal(p.gradeTamanhos) || 0), 0);
+  const valorTotalVarejo = produtos.reduce(
+    (acc, p) => acc + ((calculateGradeTotal(p.gradeTamanhos) || 0) * (Number(p.precoVarejo) || 0)),
+    0
+  );
+  const itensBaixoEstoque = produtos.filter((p) => (calculateGradeTotal(p.gradeTamanhos) || 0) <= 5).length;
+  const itensNoCatalogo = produtos.filter((p) => p.ativoNoCatalogo !== false).length;
+
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       {/* Topo da Tela com Ações de ERP */}
@@ -339,6 +389,61 @@ export default function EstoqueLoja() {
       {/* ABA 1: PRODUTOS & BALCÃO */}
       {abaAtiva === "produtos" && (
         <div className="space-y-4">
+          {/* Cards de Métricas e KPIs do Estoque Balcão */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card variant="subtle" className="p-4 space-y-1.5 border-slate-800/80 bg-slate-900/60">
+              <div className="flex items-center justify-between text-slate-400">
+                <span className="text-[11px] font-semibold uppercase tracking-wider">Peças no Balcão</span>
+                <Boxes className="w-4 h-4 text-sky-400" />
+              </div>
+              <div className="text-2xl font-extrabold text-white">
+                {totalPecas}
+              </div>
+              <div className="text-[11px] text-slate-400">
+                distribuídas em {produtos.length} produtos
+              </div>
+            </Card>
+
+            <Card variant="subtle" className="p-4 space-y-1.5 border-slate-800/80 bg-slate-900/60">
+              <div className="flex items-center justify-between text-slate-400">
+                <span className="text-[11px] font-semibold uppercase tracking-wider">Valor em Estoque</span>
+                <Store className="w-4 h-4 text-emerald-400" />
+              </div>
+              <div className="text-2xl font-extrabold text-emerald-400">
+                {formatCurrency(valorTotalVarejo)}
+              </div>
+              <div className="text-[11px] text-slate-400">
+                preço de venda balcão
+              </div>
+            </Card>
+
+            <Card variant="subtle" className="p-4 space-y-1.5 border-slate-800/80 bg-slate-900/60">
+              <div className="flex items-center justify-between text-slate-400">
+                <span className="text-[11px] font-semibold uppercase tracking-wider">Vitrine Online</span>
+                <Globe className="w-4 h-4 text-sky-400" />
+              </div>
+              <div className="text-2xl font-extrabold text-white">
+                {itensNoCatalogo}
+              </div>
+              <div className="text-[11px] text-slate-400">
+                visíveis no Catálogo Público
+              </div>
+            </Card>
+
+            <Card variant="subtle" className="p-4 space-y-1.5 border-slate-800/80 bg-slate-900/60">
+              <div className="flex items-center justify-between text-slate-400">
+                <span className="text-[11px] font-semibold uppercase tracking-wider">Alerta Reposição</span>
+                <AlertTriangle className={`w-4 h-4 ${itensBaixoEstoque > 0 ? "text-rose-400" : "text-slate-500"}`} />
+              </div>
+              <div className={`text-2xl font-extrabold ${itensBaixoEstoque > 0 ? "text-rose-400" : "text-white"}`}>
+                {itensBaixoEstoque}
+              </div>
+              <div className="text-[11px] text-slate-400">
+                itens com ≤ 5 peças
+              </div>
+            </Card>
+          </div>
+
           {/* Barra de Filtros */}
           <Card variant="subtle" className="p-4 flex flex-col md:flex-row gap-3">
             <div className="flex-1">
@@ -364,7 +469,6 @@ export default function EstoqueLoja() {
             </div>
           </Card>
 
-
       {/* Tabela de Produtos da Loja */}
       <Table>
         <TableHeader>
@@ -384,14 +488,29 @@ export default function EstoqueLoja() {
           {produtosFiltrados.map((prod) => (
             <TableRow key={prod.id}>
               <TableCell>
-                <div className="font-semibold text-white">{prod.nome}</div>
-                <div className="text-xs text-slate-400 flex items-center gap-2">
-                  <span>Ref: {prod.referencia || "S/Ref"}</span>
-                  {prod.codigoBarras && (
-                    <span className="flex items-center gap-1 font-mono text-[11px] text-sky-400">
-                      <Barcode className="w-3 h-3" /> {prod.codigoBarras}
-                    </span>
-                  )}
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg overflow-hidden bg-slate-850 border border-slate-700/60 shrink-0 flex items-center justify-center">
+                    <img
+                      src={getProductImageUrl(prod)}
+                      alt={prod.nome}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        e.currentTarget.onerror = null;
+                        e.currentTarget.src = DEFAULT_PRODUCT_FALLBACK;
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-white">{prod.nome}</div>
+                    <div className="text-xs text-slate-400 flex items-center gap-2">
+                      <span>Ref: {prod.referencia || "S/Ref"}</span>
+                      {prod.codigoBarras && (
+                        <span className="flex items-center gap-1 font-mono text-[11px] text-sky-400">
+                          <Barcode className="w-3 h-3" /> {prod.codigoBarras}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </TableCell>
 
@@ -671,13 +790,92 @@ export default function EstoqueLoja() {
                 </label>
               </div>
 
-              <Input
-                label="URL da Foto do Produto (para a vitrine)"
-                value={formData.fotoUrl || ""}
-                onChange={(e) => setFormData({ ...formData, fotoUrl: e.target.value })}
-                placeholder="https://exemplo.com/foto-do-produto.jpg"
-              />
+              {/* Foto do Produto (Upload ou Link) */}
+              <div className="space-y-2 p-3 rounded-xl bg-slate-900/60 border border-slate-800">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Camera className="w-4 h-4 text-sky-400" />
+                    <span>Foto do Produto (Catálogo Online)</span>
+                  </label>
+                  {formData.fotoUrl && (
+                    <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                      Foto Ativa
+                    </span>
+                  )}
+                </div>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleUploadFotoEstoque}
+                  className="hidden"
+                />
+
+                {formData.fotoUrl ? (
+                  <div className="flex items-center gap-3 p-2 rounded-lg bg-slate-950 border border-slate-800">
+                    <div className="w-12 h-14 rounded-md overflow-hidden bg-slate-900 border border-slate-700 shrink-0">
+                      <img
+                        src={formData.fotoUrl}
+                        alt="Preview"
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          e.currentTarget.onerror = null;
+                          e.currentTarget.src = DEFAULT_PRODUCT_FALLBACK;
+                        }}
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="text-xs text-slate-300 truncate font-mono">
+                        {formData.fotoUrl.startsWith("data:") ? "Foto Otimizada (Local)" : formData.fotoUrl}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={uploadingFoto}
+                          leftIcon={<Upload className="w-3 h-3 text-sky-400" />}
+                          className="text-xs h-6 px-2"
+                        >
+                          {uploadingFoto ? "Enviando..." : "Trocar"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setFormData({ ...formData, fotoUrl: "" })}
+                          disabled={uploadingFoto}
+                          leftIcon={<X className="w-3 h-3 text-rose-400" />}
+                          className="text-xs h-6 px-2 text-rose-400 hover:text-rose-300"
+                        >
+                          Remover
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    onClick={() => !uploadingFoto && fileInputRef.current?.click()}
+                    className="border-2 border-dashed border-slate-700/80 hover:border-sky-500/70 rounded-xl p-4 text-center cursor-pointer transition-all bg-slate-950/40 hover:bg-slate-950/80 flex flex-col items-center justify-center space-y-1 group"
+                  >
+                    <Upload className="w-5 h-5 text-sky-400 group-hover:scale-110 transition-transform" />
+                    <span className="text-xs font-semibold text-white">
+                      {uploadingFoto ? "Enviando e otimizando..." : "Clique para anexar foto (JPG, PNG, WEBP)"}
+                    </span>
+                  </div>
+                )}
+
+                <Input
+                  placeholder="Ou cole a URL direta da foto aqui..."
+                  value={formData.fotoUrl || ""}
+                  onChange={(e) => setFormData({ ...formData, fotoUrl: e.target.value })}
+                  leftIcon={<ImageIcon className="w-3.5 h-3.5 text-slate-500" />}
+                />
+              </div>
             </div>
+
           </ModalBody>
 
           <ModalFooter>

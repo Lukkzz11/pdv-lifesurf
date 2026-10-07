@@ -382,6 +382,16 @@ export default function EstoqueFabrica() {
     }
   };
 
+  // Métricas Gerenciais da Fábrica
+  const opsEmAndamento = ordensProducao.filter((op) => op.status !== STATUS_OP.CONCLUIDO);
+  const pecasEmConfeccao = opsEmAndamento.reduce(
+    (acc, op) => acc + (op.grade ? Object.values(op.grade).reduce((s, v) => s + (Number(v) || 0), 0) : 0),
+    0
+  );
+  const opsProntasTransferir = ordensProducao.filter(
+    (op) => op.status === STATUS_OP.ACABAMENTO || op.status === STATUS_OP.CONCLUIDO
+  ).length;
+
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       {/* Cabeçalho de Fábrica */}
@@ -497,6 +507,61 @@ export default function EstoqueFabrica() {
       {/* ABA 1: ORDENS DE PRODUÇÃO */}
       {abaAtiva === "ops" && (
         <div className="space-y-4">
+          {/* Cards de Métricas e KPIs da Confecção */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card variant="subtle" className="p-4 space-y-1.5 border-slate-800/80 bg-slate-900/60">
+              <div className="flex items-center justify-between text-slate-400">
+                <span className="text-[11px] font-semibold uppercase tracking-wider">OPs Ativas</span>
+                <Layers className="w-4 h-4 text-sky-400" />
+              </div>
+              <div className="text-2xl font-extrabold text-white">
+                {opsEmAndamento.length}
+              </div>
+              <div className="text-[11px] text-slate-400">
+                em corte, costura ou estampa
+              </div>
+            </Card>
+
+            <Card variant="subtle" className="p-4 space-y-1.5 border-slate-800/80 bg-slate-900/60">
+              <div className="flex items-center justify-between text-slate-400">
+                <span className="text-[11px] font-semibold uppercase tracking-wider">Peças em Produção</span>
+                <Shirt className="w-4 h-4 text-amber-400" />
+              </div>
+              <div className="text-2xl font-extrabold text-amber-400">
+                {pecasEmConfeccao}
+              </div>
+              <div className="text-[11px] text-slate-400">
+                peças sendo confeccionadas
+              </div>
+            </Card>
+
+            <Card variant="subtle" className="p-4 space-y-1.5 border-slate-800/80 bg-slate-900/60">
+              <div className="flex items-center justify-between text-slate-400">
+                <span className="text-[11px] font-semibold uppercase tracking-wider">Prontos p/ Loja</span>
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              </div>
+              <div className="text-2xl font-extrabold text-emerald-400">
+                {opsProntasTransferir}
+              </div>
+              <div className="text-[11px] text-slate-400">
+                lotes em acabamento / concluídos
+              </div>
+            </Card>
+
+            <Card variant="subtle" className="p-4 space-y-1.5 border-slate-800/80 bg-slate-900/60">
+              <div className="flex items-center justify-between text-slate-400">
+                <span className="text-[11px] font-semibold uppercase tracking-wider">Matérias-Primas</span>
+                <Scissors className="w-4 h-4 text-purple-400" />
+              </div>
+              <div className="text-2xl font-extrabold text-white">
+                {materiasPrimas.length}
+              </div>
+              <div className="text-[11px] text-slate-400">
+                tecidos, aviamentos e linhas
+              </div>
+            </Card>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {ordensProducao.map((op) => {
               const config = STATUS_OP_CONFIG[op.status] || STATUS_OP_CONFIG[STATUS_OP.PLANEJAMENTO];

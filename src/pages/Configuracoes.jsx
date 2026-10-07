@@ -112,6 +112,13 @@ export default function Configuracoes() {
   const [customAccent, setCustomAccent] = useState(themeConfig.accentColor || "#38bdf8");
   const [customMode, setCustomMode] = useState(themeConfig.mode || "dark");
 
+  // Sincroniza estados do seletor quando o tema ativo muda
+  useEffect(() => {
+    if (themeConfig?.primaryColor) setCustomPrimary(themeConfig.primaryColor);
+    if (themeConfig?.accentColor) setCustomAccent(themeConfig.accentColor);
+    if (themeConfig?.mode) setCustomMode(themeConfig.mode);
+  }, [themeConfig]);
+
   // Estados da Integração com Google Workspace (Free Tier)
   const [googleClientId, setGoogleClientId] = useState(() => getGoogleClientId());
   const [googleConnected, setGoogleConnected] = useState(() => isGoogleConnected());
@@ -303,8 +310,14 @@ export default function Configuracoes() {
   // Aplicação de Tema Pré-definido
   const handleSelecionarPreset = async (presetId) => {
     try {
+      const preset = THEME_PRESETS.find((p) => p.id === presetId);
+      if (preset) {
+        setCustomPrimary(preset.primaryColor);
+        setCustomAccent(preset.accentColor);
+        setCustomMode(preset.mode);
+      }
       await changeTheme(presetId, true);
-      toast.success(`Tema "${THEME_PRESETS.find((p) => p.id === presetId)?.nome}" aplicado globalmente!`);
+      toast.success(`Tema "${preset?.nome}" aplicado e salvo na empresa!`);
     } catch (err) {
       console.error("[Configuracoes] Erro ao aplicar tema:", err);
       toast.error("Erro ao aplicar tema");
@@ -323,7 +336,7 @@ export default function Configuracoes() {
         },
         true
       );
-      toast.success("Paleta personalizada aplicada com sucesso!");
+      toast.success("Paleta da marca salva no Firestore e aplicada com sucesso!");
     } catch (err) {
       console.error("[Configuracoes] Erro ao aplicar cores:", err);
       toast.error("Erro ao aplicar cores customizadas");
@@ -801,15 +814,15 @@ export default function Configuracoes() {
         <div className="space-y-6">
           <div>
             <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-1">
-              Paletas de Cores & Temas Globais
+              Identidade Visual, Cores & Tema do ERP
             </h3>
             <p className="text-xs text-slate-400">
-              Escolha uma identidade pré-configurada ou personalize a cor primária e de acento da marca.
-              A preferência é aplicada globalmente no sistema e salva no Firestore da empresa.
+              Personalize a cor principal da marca (troque o azul padrão por Laranja Life Surf, Verde Esmeralda ou qualquer código HEX).
+              As preferências são propagadas instantaneamente em barras, botões, menus ativos e salvas no Firestore da empresa ativa ({activeTenantId || "matriz"}).
             </p>
           </div>
 
-          {/* Grid de Presets */}
+          {/* Grid de Presets Rápidos */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {THEME_PRESETS.filter((p) => p.id !== "custom").map((preset) => {
               const isSelected = themeConfig.id === preset.id;
@@ -869,11 +882,53 @@ export default function Configuracoes() {
             })}
           </div>
 
-          {/* Personalizador com Color Pickers */}
-          <Card className="p-6 space-y-4 border-slate-800">
-            <div className="flex items-center gap-2 pb-3 border-b border-slate-800 text-xs font-bold text-pink-400 uppercase tracking-wider">
-              <Sparkles className="w-4 h-4" />
-              <span>Personalizador de Marca Própria (Cores Customizadas)</span>
+          {/* Personalizador com Color Pickers & Swatches Rápidos */}
+          <Card className="p-6 space-y-5 border-slate-800">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2 text-xs font-bold text-pink-400 uppercase tracking-wider">
+                <Sparkles className="w-4 h-4" />
+                <span>Personalizador de Marca Própria (Cores Customizadas)</span>
+              </div>
+              <span className="text-[11px] text-slate-400">
+                Salva automaticamente no Firestore da empresa
+              </span>
+            </div>
+
+            {/* Chips Rápidos de Cores Frequentes */}
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-slate-300 block">
+                Atalhos Rápidos de Cores da Marca:
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                {[
+                  { nome: "Laranja Life Surf", primary: "#f97316", accent: "#fb923c" },
+                  { nome: "Azul Oceano", primary: "#0284c7", accent: "#38bdf8" },
+                  { nome: "Verde Esmeralda", primary: "#10b981", accent: "#34d399" },
+                  { nome: "Roxo / Índigo", primary: "#6366f1", accent: "#a855f7" },
+                  { nome: "Vermelho Coral", primary: "#ef4444", accent: "#f87171" },
+                  { nome: "Âmbar Dourado", primary: "#f59e0b", accent: "#fbbf24" }
+                ].map((swatch) => (
+                  <button
+                    key={swatch.nome}
+                    type="button"
+                    onClick={() => {
+                      setCustomPrimary(swatch.primary);
+                      setCustomAccent(swatch.accent);
+                    }}
+                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
+                      customPrimary === swatch.primary
+                        ? "bg-slate-800 border-white/40 text-white shadow-sm"
+                        : "bg-slate-900/60 border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white"
+                    }`}
+                  >
+                    <span
+                      className="w-3.5 h-3.5 rounded-full border border-white/20"
+                      style={{ backgroundColor: swatch.primary }}
+                    />
+                    <span>{swatch.nome}</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
@@ -897,7 +952,7 @@ export default function Configuracoes() {
                   />
                 </div>
                 <span className="text-[10px] text-slate-500 block">
-                  Utilizada em botões principais, realces e status.
+                  Utilizada em botões principais, barras e status.
                 </span>
               </div>
 
@@ -921,7 +976,7 @@ export default function Configuracoes() {
                   />
                 </div>
                 <span className="text-[10px] text-slate-500 block">
-                  Utilizada em ícones, bordas brilhantes e links.
+                  Utilizada em ícones, bordas brilhantes e menus ativos.
                 </span>
               </div>
 
@@ -943,13 +998,84 @@ export default function Configuracoes() {
               </div>
             </div>
 
-            <div className="pt-3 flex justify-end">
+            {/* Painel de Pré-visualização ao Vivo do ERP */}
+            <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800/90 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                  Pré-visualização ao Vivo dos Componentes ERP:
+                </span>
+                <span className="text-[10px] text-slate-500">
+                  Simulação com as cores selecionadas
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                {/* 1. Botão Primário */}
+                <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 flex flex-col justify-center items-center gap-2">
+                  <span className="text-[10px] text-slate-400 font-medium">Botão Primário</span>
+                  <button
+                    type="button"
+                    style={{ backgroundColor: customPrimary }}
+                    className="px-4 py-2 rounded-lg text-white font-semibold text-xs shadow-md transition-transform active:scale-95"
+                  >
+                    Salvar Pedido (F2)
+                  </button>
+                </div>
+
+                {/* 2. Menu Ativo / Navegação */}
+                <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 flex flex-col justify-center items-center gap-2">
+                  <span className="text-[10px] text-slate-400 font-medium">Menu Ativo da Barra</span>
+                  <div
+                    style={{
+                      backgroundColor: `${customPrimary}25`,
+                      borderColor: `${customPrimary}60`,
+                      color: customAccent
+                    }}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold"
+                  >
+                    <ShoppingBag className="w-4 h-4" />
+                    <span>Catálogo Online</span>
+                    <span
+                      style={{ backgroundColor: customPrimary }}
+                      className="text-[9px] font-bold text-white px-1 py-0.5 rounded"
+                    >
+                      ATIVO
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3. Card de KPI do Dashboard */}
+                <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 flex flex-col justify-center items-center gap-1.5">
+                  <span className="text-[10px] text-slate-400 font-medium">Métrica do Dashboard</span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      style={{ color: customAccent }}
+                      className="text-base font-extrabold"
+                    >
+                      R$ 14.850,00
+                    </span>
+                    <span
+                      style={{
+                        backgroundColor: `${customPrimary}20`,
+                        color: customAccent,
+                        borderColor: `${customPrimary}40`
+                      }}
+                      className="text-[9px] font-bold px-1.5 py-0.5 rounded border"
+                    >
+                      +18%
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end">
               <Button
                 variant="primary"
                 onClick={handleAplicarCoresCustomizadas}
                 leftIcon={<Save className="w-4 h-4" />}
               >
-                Aplicar Paleta Personalizada
+                Salvar Paleta no Firestore & Aplicar no ERP
               </Button>
             </div>
           </Card>

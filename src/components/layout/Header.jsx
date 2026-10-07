@@ -115,7 +115,10 @@ export function Header({ onToggleMobileMenu, sidebarCollapsed }) {
   }, [activeTenantId]);
 
   return (
-    <header className="sticky top-0 z-30 h-16 w-full glass-panel border-b border-slate-800/80 px-4 sm:px-6 flex items-center justify-between">
+    <header className="relative sticky top-0 z-30 h-16 w-full glass-panel border-b border-slate-800/80 px-4 sm:px-6 flex items-center justify-between">
+      {/* Linha superior com gradiente sutil da cor da marca */}
+      <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[var(--brand-primary)] to-transparent opacity-80 pointer-events-none" />
+
       {/* Left: Mobile Toggle & Context Info */}
       <div className="flex items-center gap-3">
         <button

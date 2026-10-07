@@ -129,65 +129,157 @@
 /* ==========================================================================
    PROPAGAÇÃO UNIVERSAL DE CORES (ACOMPANHA QUALQUER TEMA OU COR ESCOLHIDA)
    ========================================================================== */
+
+/* Cores de Texto da Marca */
 [class*="text-sky-300"],
 [class*="text-sky-400"],
 [class*="text-sky-500"] {
   color: var(--brand-accent) !important;
 }
 
-[class*="text-sky-600"] {
+[class*="text-sky-600"],
+[class*="text-sky-700"] {
   color: var(--brand-primary) !important;
 }
 
-button[class*="bg-sky-500"]:not([class*="/"]),
-button[class*="bg-sky-600"]:not([class*="/"]),
-div[class*="bg-sky-500"]:not([class*="/"]),
-span[class*="bg-sky-500"]:not([class*="/"]),
-a[class*="bg-sky-500"]:not([class*="/"]) {
-  background-color: var(--brand-primary) !important;
-}
-
-[class*="hover:bg-sky-400"]:hover,
-[class*="hover:bg-sky-500"]:hover,
-[class*="hover:bg-sky-600"]:hover {
-  background-color: var(--brand-accent) !important;
-}
-
 [class*="hover:text-sky-300"]:hover,
-[class*="hover:text-sky-400"]:hover {
+[class*="hover:text-sky-400"]:hover,
+[class*="hover:text-sky-500"]:hover {
   color: var(--brand-accent) !important;
 }
 
-[class*="border-sky-400"],
-[class*="border-sky-500"],
-[class*="border-sky-600"] {
+/* Fundos Sólidos Primários (Botões, Badges Sólidos, Indicadores) */
+[class~="bg-sky-500"],
+[class~="bg-sky-600"],
+[class~="bg-sky-700"],
+button.bg-sky-500,
+button.bg-sky-600,
+a.bg-sky-500,
+.btn-primary {
+  background-color: var(--brand-primary) !important;
+}
+
+/* Botões com classes combinadas de Tailwind (bg-sky-500 hover:bg-sky-400 etc) */
+button[class*="bg-sky-500"],
+button[class*="bg-sky-600"],
+a[class*="bg-sky-500"],
+a[class*="bg-sky-600"] {
+  background-color: var(--brand-primary) !important;
+}
+
+/* Estados de Hover em Fundos Sólidos */
+[class*="hover:bg-sky-400"]:hover,
+[class*="hover:bg-sky-500"]:hover,
+[class*="hover:bg-sky-600"]:hover {
+  background-color: var(--brand-primary-hover, var(--brand-accent)) !important;
+}
+
+/* Bordas Sólidas */
+[class~="border-sky-400"],
+[class~="border-sky-500"],
+[class~="border-sky-600"] {
   border-color: var(--brand-primary) !important;
 }
 
+/* Anéis de Foco e Destaque */
 [class*="ring-sky-400"],
-[class*="ring-sky-500"] {
+[class*="ring-sky-500"],
+[class*="ring-sky-600"] {
   --tw-ring-color: var(--brand-accent) !important;
 }
 
 [class*="focus:border-sky-500"]:focus,
-[class*="focus-visible:ring-sky-400"]:focus-visible {
+[class*="focus:border-sky-400"]:focus {
+  border-color: var(--brand-primary) !important;
+}
+
+[class*="focus-visible:ring-sky-400"]:focus-visible,
+[class*="focus-visible:ring-sky-500"]:focus-visible {
   border-color: var(--brand-primary) !important;
   --tw-ring-color: var(--brand-accent) !important;
 }
 
-/* Opacidades dinâmicas (/10, /15, /20, /30) */
+/* Opacidades Dinâmicas de Fundo (/10, /15, /20, /30) para Menus Ativos e Badges */
 [class*="bg-sky-500/"],
-[class*="bg-sky-400/"] {
+[class*="bg-sky-400/"],
+[class*="bg-sky-600/"] {
   background-color: rgba(var(--brand-primary-rgb, 2, 132, 199), 0.16) !important;
 }
 
-[class*="border-sky-500/"],
-[class*="border-sky-400/"] {
-  border-color: rgba(var(--brand-primary-rgb, 2, 132, 199), 0.35) !important;
+[class*="hover:bg-sky-500/"]:hover,
+[class*="hover:bg-sky-400/"]:hover {
+  background-color: rgba(var(--brand-primary-rgb, 2, 132, 199), 0.26) !important;
 }
 
-[class*="shadow-sky-500/"] {
-  --tw-shadow-color: rgba(var(--brand-primary-rgb, 2, 132, 199), 0.25) !important;
+/* Bordas com Opacidade (/20, /30, /40, /50) */
+[class*="border-sky-500/"],
+[class*="border-sky-400/"],
+[class*="border-sky-600/"] {
+  border-color: rgba(var(--brand-primary-rgb, 2, 132, 199), 0.38) !important;
+}
+
+[class*="hover:border-sky-500/"]:hover,
+[class*="hover:border-sky-400/"]:hover {
+  border-color: rgba(var(--brand-primary-rgb, 2, 132, 199), 0.6) !important;
+}
+
+/* Sombras com Glow da Marca */
+[class*="shadow-sky-500/"],
+[class*="shadow-sky-"] {
+  --tw-shadow-color: rgba(var(--brand-primary-rgb, 2, 132, 199), 0.28) !important;
+  box-shadow: 0 10px 15px -3px rgba(var(--brand-primary-rgb, 2, 132, 199), 0.2) !important;
+}
+
+/* Gradientes da Marca */
+[class*="from-sky-600"] {
+  --tw-gradient-from: var(--brand-primary) var(--tw-gradient-from-position) !important;
+}
+[class*="to-cyan-400"],
+[class*="to-sky-400"] {
+  --tw-gradient-to: var(--brand-accent) var(--tw-gradient-to-position) !important;
+}
+
+/* ==========================================================================
+   PADRÃO ERP MODERNO: TABELAS FLUIDAS & CARDS DE KPIS
+   ========================================================================== */
+.erp-fluid-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+}
+
+.erp-fluid-table thead tr {
+  background-color: rgba(15, 23, 42, 0.7);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.erp-fluid-table tbody tr {
+  transition: background-color 0.15s ease;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.erp-fluid-table tbody tr:nth-child(even) {
+  background-color: rgba(255, 255, 255, 0.015);
+}
+
+.erp-fluid-table tbody tr:hover {
+  background-color: rgba(var(--brand-primary-rgb, 2, 132, 199), 0.07);
+}
+
+.erp-kpi-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.875rem;
+  padding: 1.25rem;
+  background-color: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease-in-out;
+}
+
+.erp-kpi-card:hover {
+  border-color: rgba(var(--brand-primary-rgb, 2, 132, 199), 0.35);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2), 0 0 15px 0 rgba(var(--brand-primary-rgb, 2, 132, 199), 0.1);
 }
 
 /* ==========================================================================

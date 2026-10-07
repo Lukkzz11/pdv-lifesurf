@@ -21,6 +21,7 @@ import { db } from "../config/firebase";
  */
 
 import { DEFAULT_COMPANY } from "./tenantService";
+import { getProductImageUrl } from "./imageUploadService";
 
 // Produtos padrão da vitrine (Coleção Oficial LifeSurf)
 export const DEMO_CATALOG_PRODUCTS = [
@@ -265,11 +266,18 @@ export async function fetchAdminCatalogProducts(companyId) {
     const snapshot = await getDocs(q);
 
     if (!snapshot.empty) {
-      const items = snapshot.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data(),
-        ativoNoCatalogo: docSnap.data().ativoNoCatalogo !== false
-      }));
+      const items = snapshot.docs.map((docSnap) => {
+        const data = docSnap.data();
+        const foto = getProductImageUrl(data);
+        return {
+          id: docSnap.id,
+          ...data,
+          fotoUrl: foto,
+          imageUrl: foto,
+          imagem: foto,
+          ativoNoCatalogo: data.ativoNoCatalogo !== false
+        };
+      });
 
       if (items.length > 0) {
         saveLocalCatalogProducts(tenantId, items);
@@ -280,8 +288,17 @@ export async function fetchAdminCatalogProducts(companyId) {
     console.warn("[catalogService] Erro ao buscar produtos admin no Firestore:", err);
   }
 
-  // Fallback para lista local
-  return getLocalCatalogProducts(tenantId);
+  // Fallback para lista local normalizada
+  const localItems = getLocalCatalogProducts(tenantId);
+  return localItems.map((prod) => {
+    const foto = getProductImageUrl(prod);
+    return {
+      ...prod,
+      fotoUrl: foto,
+      imageUrl: foto,
+      imagem: foto
+    };
+  });
 }
 
 /**
@@ -297,11 +314,18 @@ export async function fetchPublicCatalog(companyId) {
 
     if (!snapshot.empty) {
       const items = snapshot.docs
-        .map((docSnap) => ({
-          id: docSnap.id,
-          ...docSnap.data(),
-          ativoNoCatalogo: docSnap.data().ativoNoCatalogo !== false
-        }))
+        .map((docSnap) => {
+          const data = docSnap.data();
+          const foto = getProductImageUrl(data);
+          return {
+            id: docSnap.id,
+            ...data,
+            fotoUrl: foto,
+            imageUrl: foto,
+            imagem: foto,
+            ativoNoCatalogo: data.ativoNoCatalogo !== false
+          };
+        })
         .filter((prod) => prod.ativo !== false && prod.ativoNoCatalogo !== false && prod.ocultoNoCatalogo !== true);
 
       if (items.length > 0) return items;
@@ -310,11 +334,21 @@ export async function fetchPublicCatalog(companyId) {
     console.warn("[catalogService] Erro ao buscar produtos reais para a vitrine:", err);
   }
 
-  // Fallback: filtra produtos do cache local
+  // Fallback: filtra produtos do cache local normalizados
   const localItems = getLocalCatalogProducts(tenantId);
-  return localItems.filter(
-    (prod) => prod.ativo !== false && prod.ativoNoCatalogo !== false && prod.ocultoNoCatalogo !== true
-  );
+  return localItems
+    .map((prod) => {
+      const foto = getProductImageUrl(prod);
+      return {
+        ...prod,
+        fotoUrl: foto,
+        imageUrl: foto,
+        imagem: foto
+      };
+    })
+    .filter(
+      (prod) => prod.ativo !== false && prod.ativoNoCatalogo !== false && prod.ocultoNoCatalogo !== true
+    );
 }
 
 /**
@@ -378,9 +412,13 @@ export async function toggleProductCatalogDestaque(companyId, productId, isDesta
  */
 export async function saveCatalogProduct(companyId, productData, productId = null) {
   const tenantId = companyId || "lifesurf";
+  const fotoNormalizada = getProductImageUrl(productData);
 
   const payload = {
     ...productData,
+    fotoUrl: fotoNormalizada,
+    imageUrl: fotoNormalizada,
+    imagem: fotoNormalizada,
     ativo: productData.ativo !== false,
     ativoNoCatalogo: productData.ativoNoCatalogo !== false,
     destaque: Boolean(productData.destaque),
@@ -408,7 +446,7 @@ export async function saveCatalogProduct(companyId, productData, productId = nul
     }
   }
 
-  // Atualiza cache local
+  // Atualiza cache local garantindo sincronização
   const current = getLocalCatalogProducts(tenantId);
   let updated;
   if (productId) {

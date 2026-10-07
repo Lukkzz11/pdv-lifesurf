@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useTenant } from "../contexts/TenantContext";
 import { useAuth } from "../security/AuthContext";
 import {
@@ -11,6 +11,12 @@ import {
   removeProductFromCatalog,
   resetCatalogToDefault
 } from "../services/catalogService";
+import {
+  uploadProductImage,
+  getProductImageUrl,
+  DEFAULT_PRODUCT_FALLBACK,
+  SURFWEAR_SAMPLE_PHOTOS
+} from "../services/imageUploadService";
 import { CATEGORIAS_MODA } from "../services/stockService";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
@@ -54,8 +60,13 @@ import {
   Tag,
   SlidersHorizontal,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Upload,
+  Camera,
+  Loader2,
+  X
 } from "lucide-react";
+
 
 export default function GerenciarCatalogo() {
   const { activeTenantId } = useTenant();
@@ -104,6 +115,38 @@ export default function GerenciarCatalogo() {
     destaque: false,
     gradeTamanhos: { P: 10, M: 20, G: 15, GG: 8 }
   });
+
+  const [uploadingFoto, setUploadingFoto] = useState(false);
+  const fileInputRef = useRef(null);
+
+  // Upload e Otimização Direta de Foto do Produto (Storage + Canvas Fallback)
+  const handleSelecionarArquivoFoto = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("Selecione um arquivo de imagem válido (JPG, PNG ou WEBP).");
+      return;
+    }
+
+    setUploadingFoto(true);
+    const toastId = toast.loading("Otimizando e preparando foto...");
+    try {
+      const nomeBase = (formProduto.referencia || formProduto.nome || "produto")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "-");
+      const res = await uploadProductImage(tenantId, file, `${nomeBase}.jpg`);
+      setFormProduto((prev) => ({ ...prev, fotoUrl: res.url }));
+      toast.success("Foto do produto carregada e pronta!", { id: toastId });
+    } catch (err) {
+      console.error("[GerenciarCatalogo] Erro ao carregar foto:", err);
+      toast.error("Erro ao carregar foto: " + (err.message || "Tente novamente"), { id: toastId });
+    } finally {
+      setUploadingFoto(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
 
   // 1. CARREGAMENTO DOS DADOS DO CATÁLOGO
   const carregarDados = async () => {
@@ -522,51 +565,71 @@ export default function GerenciarCatalogo() {
         </form>
       </Card>
 
-      {/* 3. CARDS DE MÉTRICAS DAS MERCADORIAS */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Card variant="subtle" className="p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400">
+      {/* 3. CARDS DE MÉTRICAS DAS MERCADORIAS (PADRÃO ERP MODERNO & AREJADO) */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+        <Card variant="subtle" className="p-4 rounded-xl border border-slate-800/80 bg-slate-900/40 backdrop-blur-md flex items-center justify-between hover:border-slate-700/80 transition-all">
+          <div className="space-y-1">
+            <span className="text-[11px] font-semibold tracking-wider uppercase text-slate-400 block">
+              Total Cadastrado
+            </span>
+            <div className="text-2xl font-black text-white tracking-tight">
+              {contadores.total}
+            </div>
+            <span className="text-[10px] text-slate-500 font-medium">Itens no banco</span>
+          </div>
+          <div className="w-11 h-11 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0">
             <ShoppingBag className="w-5 h-5" />
           </div>
-          <div>
-            <div className="text-xl font-black text-white">{contadores.total}</div>
-            <div className="text-[11px] text-slate-400">Total de Mercadorias</div>
-          </div>
         </Card>
 
-        <Card variant="subtle" className="p-4 flex items-center gap-3 border-emerald-500/20">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+        <Card variant="subtle" className="p-4 rounded-xl border border-emerald-500/20 bg-slate-900/40 backdrop-blur-md flex items-center justify-between hover:border-emerald-500/40 transition-all">
+          <div className="space-y-1">
+            <span className="text-[11px] font-semibold tracking-wider uppercase text-emerald-400/90 block">
+              Visíveis na Vitrine
+            </span>
+            <div className="text-2xl font-black text-emerald-400 tracking-tight">
+              {contadores.ativos}
+            </div>
+            <span className="text-[10px] text-emerald-500/80 font-medium">Exibição pública ativa</span>
+          </div>
+          <div className="w-11 h-11 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400 shrink-0">
             <Eye className="w-5 h-5" />
           </div>
-          <div>
-            <div className="text-xl font-black text-emerald-400">{contadores.ativos}</div>
-            <div className="text-[11px] text-slate-400">Visíveis na Vitrine</div>
-          </div>
         </Card>
 
-        <Card variant="subtle" className="p-4 flex items-center gap-3 border-amber-500/20">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+        <Card variant="subtle" className="p-4 rounded-xl border border-amber-500/20 bg-slate-900/40 backdrop-blur-md flex items-center justify-between hover:border-amber-500/40 transition-all">
+          <div className="space-y-1">
+            <span className="text-[11px] font-semibold tracking-wider uppercase text-amber-400/90 block">
+              Ocultos / Pausados
+            </span>
+            <div className="text-2xl font-black text-amber-400 tracking-tight">
+              {contadores.ocultos}
+            </div>
+            <span className="text-[10px] text-amber-500/80 font-medium">Fora da vitrine</span>
+          </div>
+          <div className="w-11 h-11 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-center text-amber-400 shrink-0">
             <EyeOff className="w-5 h-5" />
           </div>
-          <div>
-            <div className="text-xl font-black text-amber-400">{contadores.ocultos}</div>
-            <div className="text-[11px] text-slate-400">Retirados / Ocultos</div>
-          </div>
         </Card>
 
-        <Card variant="subtle" className="p-4 flex items-center gap-3 border-yellow-500/20">
-          <div className="w-10 h-10 rounded-xl bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center text-yellow-400">
-            <Star className="w-5 h-5" />
+        <Card variant="subtle" className="p-4 rounded-xl border border-yellow-500/20 bg-slate-900/40 backdrop-blur-md flex items-center justify-between hover:border-yellow-500/40 transition-all">
+          <div className="space-y-1">
+            <span className="text-[11px] font-semibold tracking-wider uppercase text-yellow-400/90 block">
+              Em Destaque
+            </span>
+            <div className="text-2xl font-black text-yellow-400 tracking-tight">
+              {contadores.destaques}
+            </div>
+            <span className="text-[10px] text-yellow-500/80 font-medium">Topo do catálogo</span>
           </div>
-          <div>
-            <div className="text-xl font-black text-yellow-400">{contadores.destaques}</div>
-            <div className="text-[11px] text-slate-400">Itens em Destaque</div>
+          <div className="w-11 h-11 rounded-xl bg-yellow-500/10 border border-yellow-500/25 flex items-center justify-center text-yellow-400 shrink-0">
+            <Star className="w-5 h-5 fill-yellow-400/20" />
           </div>
         </Card>
       </div>
 
       {/* 4. BARRA DE FILTROS & BOTÃO NOVA MERCADORIA */}
-      <Card variant="subtle" className="p-4 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+      <Card variant="subtle" className="p-4 rounded-xl border border-slate-800/80 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
         <div className="flex-1 flex flex-col sm:flex-row gap-3">
           <div className="flex-1">
             <Input
@@ -614,11 +677,11 @@ export default function GerenciarCatalogo() {
         </Button>
       </Card>
 
-      {/* 5. TABELA DE GESTÃO DAS MERCADORIAS */}
-      <Card variant="subtle" className="overflow-hidden border-slate-800">
+      {/* 5. TABELA DE GESTÃO DAS MERCADORIAS (DESIGN FLUIDO & LEGIBILIDADE SUPERIOR) */}
+      <Card variant="subtle" className="overflow-hidden border border-slate-800/80 rounded-xl shadow-lg">
         <Table>
           <TableHeader>
-            <TableRow isInteractive={false}>
+            <TableRow isInteractive={false} className="bg-slate-950/80 border-b border-slate-800 text-[11px]">
               <TableHead className="w-16">Foto</TableHead>
               <TableHead>Mercadoria / Nome</TableHead>
               <TableHead>Categoria & Ref</TableHead>
@@ -640,19 +703,27 @@ export default function GerenciarCatalogo() {
               produtosFiltrados.map((prod) => {
                 const isVisivel = prod.ativoNoCatalogo !== false;
                 const isDestaque = Boolean(prod.destaque);
+                const fotoUrl = getProductImageUrl(prod);
 
                 return (
-                  <TableRow key={prod.id} className={!isVisivel ? "opacity-60 bg-slate-950/40" : ""}>
+                  <TableRow
+                    key={prod.id}
+                    className={cn(
+                      "transition-colors duration-150 border-b border-slate-800/40 even:bg-slate-900/25 hover:bg-slate-800/40",
+                      !isVisivel && "opacity-60 bg-slate-950/40"
+                    )}
+                  >
                     {/* Foto */}
                     <TableCell>
-                      <div className="w-12 h-12 rounded-lg bg-slate-900 border border-slate-800 overflow-hidden flex items-center justify-center shrink-0">
-                        {prod.fotoUrl ? (
+                      <div className="w-12 h-14 rounded-lg bg-slate-900 border border-slate-800/90 overflow-hidden flex items-center justify-center shrink-0 shadow-xs">
+                        {fotoUrl ? (
                           <img
-                            src={prod.fotoUrl}
+                            src={fotoUrl}
                             alt={prod.nome}
                             className="w-full h-full object-cover"
                             onError={(e) => {
-                              e.currentTarget.style.display = "none";
+                              e.currentTarget.onerror = null;
+                              e.currentTarget.src = DEFAULT_PRODUCT_FALLBACK;
                             }}
                           />
                         ) : (
@@ -660,6 +731,7 @@ export default function GerenciarCatalogo() {
                         )}
                       </div>
                     </TableCell>
+
 
                     {/* Nome & Cores */}
                     <TableCell>
@@ -869,35 +941,153 @@ export default function GerenciarCatalogo() {
               </div>
             </div>
 
-            {/* URL da Foto e Preview */}
-            <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1">
-                URL da Foto do Produto
-              </label>
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <Input
-                    placeholder="https://exemplo.com/foto-do-produto.jpg"
-                    value={formProduto.fotoUrl}
-                    onChange={(e) => setFormProduto({ ...formProduto, fotoUrl: e.target.value })}
-                    leftIcon={<ImageIcon className="w-4 h-4 text-slate-500" />}
-                  />
-                </div>
+            {/* GESTÃO AVANÇADA DA FOTO DO PRODUTO (UPLOAD DIRETO, PREVIEW & PRESETS) */}
+            <div className="space-y-2.5 p-3.5 rounded-xl bg-slate-900/80 border border-slate-800">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Camera className="w-4 h-4 text-sky-400" />
+                  <span>Foto da Mercadoria (Catálogo Online)</span>
+                </label>
                 {formProduto.fotoUrl && (
-                  <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-700 shrink-0">
+                  <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                    Foto Vinculada
+                  </span>
+                )}
+              </div>
+
+              {/* Input Invisível para Captura de Arquivo */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleSelecionarArquivoFoto}
+                className="hidden"
+              />
+
+              {formProduto.fotoUrl ? (
+                /* PREVIEW DA FOTO COM AÇÕES */
+                <div className="flex items-center gap-3 p-2.5 rounded-lg bg-slate-950 border border-slate-800">
+                  <div className="w-16 h-20 rounded-md overflow-hidden bg-slate-900 border border-slate-700 shrink-0 shadow-sm relative group">
                     <img
                       src={formProduto.fotoUrl}
                       alt="Preview"
                       className="w-full h-full object-cover"
-                      onError={(e) => (e.currentTarget.style.display = "none")}
+                      onError={(e) => {
+                        e.currentTarget.onerror = null;
+                        e.currentTarget.src = DEFAULT_PRODUCT_FALLBACK;
+                      }}
                     />
                   </div>
-                )}
+
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    <div className="text-xs font-semibold text-white truncate">
+                      {formProduto.nome || "Foto do Produto"}
+                    </div>
+                    <div className="text-[11px] text-slate-400 truncate font-mono">
+                      {formProduto.fotoUrl.startsWith("data:")
+                        ? "Imagem local otimizada (Base64)"
+                        : formProduto.fotoUrl}
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploadingFoto}
+                        leftIcon={<Upload className="w-3.5 h-3.5 text-sky-400" />}
+                        className="text-xs h-7 px-2.5"
+                      >
+                        {uploadingFoto ? "Enviando..." : "Trocar Foto"}
+                      </Button>
+
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setFormProduto({ ...formProduto, fotoUrl: "" })}
+                        disabled={uploadingFoto}
+                        leftIcon={<X className="w-3.5 h-3.5 text-rose-400" />}
+                        className="text-xs h-7 px-2.5 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10"
+                      >
+                        Remover
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* DROPZONE PARA ESCOLHER FOTO */
+                <div
+                  onClick={() => !uploadingFoto && fileInputRef.current?.click()}
+                  className={cn(
+                    "border-2 border-dashed border-slate-700/80 hover:border-sky-500/70 rounded-xl p-5 text-center cursor-pointer transition-all duration-200 bg-slate-950/40 hover:bg-slate-950/80 flex flex-col items-center justify-center space-y-2 group",
+                    uploadingFoto && "opacity-60 pointer-events-none"
+                  )}
+                >
+                  <div className="w-12 h-12 rounded-xl bg-sky-500/10 group-hover:bg-sky-500/20 text-sky-400 flex items-center justify-center transition-colors">
+                    {uploadingFoto ? (
+                      <Loader2 className="w-6 h-6 animate-spin text-sky-400" />
+                    ) : (
+                      <Upload className="w-6 h-6 group-hover:scale-110 transition-transform" />
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-white block">
+                      {uploadingFoto ? "Processando e otimizando imagem..." : "Clique para escolher uma foto do seu dispositivo"}
+                    </span>
+                    <span className="text-[11px] text-slate-400 mt-0.5 block">
+                      Suporta PNG, JPG, JPEG e WEBP (otimizada automaticamente para alta velocidade)
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* OPÇÃO DE COLAR URL DIRETA */}
+              <div className="pt-1">
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <Input
+                      placeholder="Ou cole aqui o link HTTPS direto da foto..."
+                      value={formProduto.fotoUrl}
+                      onChange={(e) => setFormProduto({ ...formProduto, fotoUrl: e.target.value })}
+                      leftIcon={<ImageIcon className="w-4 h-4 text-slate-500" />}
+                    />
+                  </div>
+                </div>
               </div>
-              <span className="text-[11px] text-slate-500 mt-0.5 block">
-                Insira o link direto de uma foto hospedada (Unsplash, Imgur ou Cloud Storage).
-              </span>
+
+              {/* FOTOS DE AMOSTRA DA COLEÇÃO LIFESURF (1 CLIQUE) */}
+              <div className="pt-2 border-t border-slate-800/80">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block mb-1.5">
+                  Ou escolha uma foto de demonstração da coleção LifeSurf:
+                </span>
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                  {SURFWEAR_SAMPLE_PHOTOS.map((amostra, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setFormProduto({ ...formProduto, fotoUrl: amostra.url })}
+                      className={cn(
+                        "flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[11px] shrink-0 transition-all cursor-pointer",
+                        formProduto.fotoUrl === amostra.url
+                          ? "bg-sky-500/15 border-sky-500/50 text-sky-400 font-bold"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700"
+                      )}
+                      title={amostra.nome}
+                    >
+                      <img
+                        src={amostra.url}
+                        alt={amostra.nome}
+                        className="w-4 h-4 rounded-full object-cover shrink-0"
+                      />
+                      <span>{amostra.categoria}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
+
 
             {/* Cores Disponíveis */}
             <div>
